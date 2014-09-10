@@ -6,11 +6,12 @@ module HuaweiModem
 
   def setup_modem
     @sp = SerialPort.new('/dev/ttyUSB0', 115200)
+    @sp.read_timeout = 100
     @huawei_replies = []
     @huawei_mutex = Mutex.new
     @huawei_thread = Thread.new {
       loop {
-        HuaweiModem::read_reply
+        read_reply
         sleep 1
       }
     }
@@ -45,11 +46,21 @@ module HuaweiModem
   end
 
   def pdu_to_ussd(str)
-    str.pack('H*').unpack('b*').join.scan(/.{7}/).
+    [str].pack('H*').unpack('b*').join.scan(/.{7}/).
         map { |s| [s+"0"].pack('b*') }.join
   end
 
   def send_ussd(str)
     send_modem("AT+CUSD=1,\"#{ussd_to_pdu(str)}\"")
+  end
+
+  def send_sms(number, msg)
+    send_modem('AT+CMGF=1')
+    send_modem("AT+CMGS=\"#{number}\"")
+    send_modem("#{msg}\x1a")
+  end
+
+  def read_sms(number=nil)
+    send_modem('AT+CMGL="ALL"')
   end
 end
