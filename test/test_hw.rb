@@ -4,18 +4,21 @@ $LOAD_PATH.push '../lib'
 require 'HuaweiModem'
 include HuaweiModem
 
-setup_modem
-send_ussd('*100#')
+
+modem_setup
+puts get_operator
+#sleep 1
+#ussd_send('*128#')
+#sms_send('93999699', 'SMS from Dreamplug')
+#sms_send('100', 'internet')
+#sms_scan
 #sleep 10
-send_modem('AT+CMGF=1')
-send_modem("AT+CMGS=\"93999699\"\n\rTest from DP at 8:26\x1a")
-sleep 5
-@huawei_replies.each { |r|
-  puts "Parsing #{r}"
-  case r
-    when /\+CUSD:/
-      puts pdu_to_ussd( r.match(/.*\"(.*)\".*/ )[1] )
-  end
-}
+#ussd_send('*100#')
+#sms_scan
+#@huawei_sms.each{|k,v| puts "#{k}: #{v.inspect}"}
+#sms_scan
+#sms_delete( 0 )
+#sms_scan
+#sleep 10
 #puts HuaweiModem::send_modem('atz')
 #sleep 10

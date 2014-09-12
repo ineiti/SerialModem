@@ -4,40 +4,78 @@ require 'serialport'
 module HuaweiModem
   extend self
 
-  def setup_modem
-    @sp = SerialPort.new('/dev/ttyUSB0', 115200)
-    @sp.read_timeout = 100
+  def modem_setup
+    @huawei_sp = SerialPort.new('/dev/ttyUSB2', 115200)
+    @huawei_sp.read_timeout = 100
     @huawei_replies = []
+    @huawei_codes = {}
+    @huawei_sms = {}
+    @huawei_ussd = []
+    @huawei_ussd_results = {}
     @huawei_mutex = Mutex.new
     @huawei_thread = Thread.new {
       loop {
         read_reply
-        sleep 1
+        sleep 0.5
       }
+    }
+    modem_send('atz')
+  end
+
+  def read_reply(wait = false)
+    @huawei_mutex.synchronize {
+      begin
+        if wait
+          @huawei_replies.push @huawei_sp.readline
+        end
+        if not @huawei_sp.eof?
+          @huawei_sp.readlines.each { |l|
+            @huawei_replies.push l.chomp
+          }
+        end
+      rescue Exception => e
+        puts "#{e.inspect}"
+        puts "#{e.to_s}"
+        puts e.backtrace
+      end
+
+      ret = []
+      while m = @huawei_replies.shift
+        #puts "Reply: #{m}"
+        ret.push m
+        if m =~ /\+[\w]{4}: /
+          code, msg = m[1..4], m[7..-1]
+          #puts "found code #{code} - #{msg}"
+          @huawei_codes[code] = msg
+          case code
+            when /CMGL/
+              sms_id, sms_flag, sms_number, sms_unknown, sms_data =
+                  msg.scan(/(".*?"|[^",]\s*|,,)/)
+              ret.push @huawei_replies.shift
+              @huawei_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_data,
+                                     ret.last]
+            when /CUSD/
+              if pdu = msg.match(/.*\"(.*)\".*/)
+                ussd_result(pdu_to_ussd(pdu[1]))
+              end
+          end
+        end
+      end
+      ret
     }
   end
 
-  def read_reply
-    if not @sp.eof?
-      @sp.readlines.each { |l|
-        @huawei_mutex.synchronize {
-          @huawei_replies.push l.chomp
-        }
-        puts l.chomp
-      }
-    end
-  end
-
-  def send_modem(str)
-    @sp.write("#{str}\r\n")
+  def modem_send(str)
+    @huawei_sp.write("#{str}\r\n")
+    read_reply(true)
   end
 
   def switch_to_hilink
-    send_modem('AT^U2DIAG=119')
+    modem_send('AT^U2DIAG=119')
   end
 
   def save_modem
-    send_modem('AT^U2DIAG=0')
+    modem_send('AT^U2DIAG=0')
   end
 
   def ussd_to_pdu(str)
@@ -50,17 +88,42 @@ module HuaweiModem
         map { |s| [s+"0"].pack('b*') }.join
   end
 
-  def send_ussd(str)
-    send_modem("AT+CUSD=1,\"#{ussd_to_pdu(str)}\"")
+  def ussd_send(str)
+    raise 'USSDinprogress' if @huawei_ussd.size > 0
+    @huawei_ussd.push str
+    modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str)}\"")
   end
 
-  def send_sms(number, msg)
-    send_modem('AT+CMGF=1')
-    send_modem("AT+CMGS=\"#{number}\"")
-    send_modem("#{msg}\x1a")
+  def ussd_result(str)
+    cmd = @huawei_ussd.pop
+    @huawei_ussd_results[cmd] = str
+    puts "#{cmd}: #{str}"
   end
 
-  def read_sms(number=nil)
-    send_modem('AT+CMGL="ALL"')
+  def sms_send(number, msg)
+    modem_send('AT+CMGF=1')
+    modem_send("AT+CMGS=\"#{number}\"")
+    modem_send("#{msg}\x1a")
   end
+
+  def sms_scan
+    modem_send('AT+CMGF=1')
+    modem_send('AT+CMGL="ALL"')
+  end
+
+  def sms_delete(number)
+    if @huawei_sms.has_key? number
+      modem_send("AT+CMGD=#{number}")
+      @huawei_sms.delete number
+    end
+  end
+
+  def get_operator
+    modem_send('AT+COPS=3,0')
+    modem_send('AT+COPS?')
+    if @huawei_codes.has_key? 'COPS'
+      @huawei_codes['COPS'].scan(/(".*?"|[^",]\s*|,,)/)[2]
+    end
+  end
+
 end
