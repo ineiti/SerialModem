@@ -4,7 +4,7 @@ require 'serialport'
 module HuaweiModem
   extend self
 
-  def modem_setup
+  def setup
     @huawei_sp = SerialPort.new('/dev/ttyUSB2', 115200)
     @huawei_sp.read_timeout = 100
     @huawei_replies = []
@@ -26,7 +26,11 @@ module HuaweiModem
     @huawei_mutex.synchronize {
       begin
         if wait
-          @huawei_replies.push @huawei_sp.readline
+          begin
+            @huawei_replies.push @huawei_sp.readline
+          rescue EOFError => e
+            log_msg :HuaweiModem, 'Waited for string, but got nothing'
+          end
         end
         if not @huawei_sp.eof?
           @huawei_sp.readlines.each { |l|
@@ -49,8 +53,10 @@ module HuaweiModem
           @huawei_codes[code] = msg
           case code
             when /CMGL/
+              dp msg
               sms_id, sms_flag, sms_number, sms_unknown, sms_data =
-                  msg.scan(/(".*?"|[^",]\s*|,,)/)
+                  msg.scan(/(".*?"|[^",]\s*|,,)/).flatten
+              dp sms_id
               ret.push @huawei_replies.shift
               @huawei_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_data,
                                      ret.last]
@@ -124,6 +130,14 @@ module HuaweiModem
     if @huawei_codes.has_key? 'COPS'
       @huawei_codes['COPS'].scan(/(".*?"|[^",]\s*|,,)/)[2]
     end
+  end
+
+  def set_connection_type(net)
+
+  end
+
+  def traffic_statistics
+
   end
 
 end
