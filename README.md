@@ -1,6 +1,6 @@
-# HuaweiModem
+# SerialModem
 
-Simple interface for Huawei Modems. Tested:
+Simple interface for Serial Modems. Tested:
 - E303
 
 ## Installation
@@ -8,7 +8,7 @@ Simple interface for Huawei Modems. Tested:
 Add this line to your application's Gemfile:
 
 ```ruby
-gem 'HuaweiModem'
+gem 'SerialModem'
 ```
 
 And then execute:
@@ -17,7 +17,7 @@ And then execute:
 
 Or install it yourself as:
 
-    $ gem install HuaweiModem
+    $ gem install SerialModem
 
 ## Usage
 
@@ -25,7 +25,7 @@ TODO: Write usage instructions here
 
 ## Contributing
 
-1. Fork it ( https://github.com/[my-github-username]/HuaweiModem/fork )
+1. Fork it ( https://github.com/ineiti/SerialModem/fork )
 2. Create your feature branch (`git checkout -b my-new-feature`)
 3. Commit your changes (`git commit -am 'Add some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)

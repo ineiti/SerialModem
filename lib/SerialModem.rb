@@ -1,7 +1,7 @@
-require 'HuaweiModem/version'
+require 'SerialModem/version'
 require 'serialport'
 
-module HuaweiModem
+module SerialModem
   extend self
 
   def setup
@@ -29,7 +29,7 @@ module HuaweiModem
           begin
             @huawei_replies.push @huawei_sp.readline
           rescue EOFError => e
-            log_msg :HuaweiModem, 'Waited for string, but got nothing'
+            log_msg :SerialModem, 'Waited for string, but got nothing'
           end
         end
         if not @huawei_sp.eof?

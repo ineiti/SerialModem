@@ -1,8 +1,8 @@
 #!/bin/env ruby
 $LOAD_PATH.push '../lib'
 
-require 'HuaweiModem'
-include HuaweiModem
+require 'serialmodem'
+include SerialModem
 
 
 modem_setup
@@ -20,5 +20,5 @@ puts get_operator
 #sms_delete( 0 )
 #sms_scan
 #sleep 10
-#puts HuaweiModem::send_modem('atz')
+#puts SerialModem::send_modem('atz')
 #sleep 10

@@ -1,4 +1,4 @@
 source 'https://rubygems.org'
 
-# Specify your gem's dependencies in HuaweiModem.gemspec
+# Specify your gem's dependencies in SerialModem.gemspec
 gemspec
