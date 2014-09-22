@@ -72,6 +72,7 @@ module SerialModem
   end
 
   def modem_send(str)
+    ddputs(2){"Sending string #{str} to modem"}
     @huawei_sp.write("#{str}\r\n")
     read_reply(true)
   end
