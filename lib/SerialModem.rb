@@ -5,15 +5,15 @@ module SerialModem
   extend self
 
   def setup
-    @huawei_sp = SerialPort.new('/dev/ttyUSB2', 115200)
-    @huawei_sp.read_timeout = 100
-    @huawei_replies = []
-    @huawei_codes = {}
-    @huawei_sms = {}
-    @huawei_ussd = []
-    @huawei_ussd_results = {}
-    @huawei_mutex = Mutex.new
-    @huawei_thread = Thread.new {
+    @serial_sp = SerialPort.new('/dev/ttyUSB2', 115200)
+    @serial_sp.read_timeout = 100
+    @serial_replies = []
+    @serial_codes = {}
+    @serial_sms = {}
+    @serial_ussd = []
+    @serial_ussd_results = {}
+    @serial_mutex = Mutex.new
+    @serial_thread = Thread.new {
       loop {
         read_reply
         sleep 0.5
@@ -23,18 +23,18 @@ module SerialModem
   end
 
   def read_reply(wait = false)
-    @huawei_mutex.synchronize {
+    @serial_mutex.synchronize {
       begin
         if wait
           begin
-            @huawei_replies.push @huawei_sp.readline
+            @serial_replies.push @serial_sp.readline
           rescue EOFError => e
             log_msg :SerialModem, 'Waited for string, but got nothing'
           end
         end
-        if not @huawei_sp.eof?
-          @huawei_sp.readlines.each { |l|
-            @huawei_replies.push l.chomp
+        if not @serial_sp.eof?
+          @serial_sp.readlines.each { |l|
+            @serial_replies.push l.chomp
           }
         end
       rescue Exception => e
@@ -44,21 +44,21 @@ module SerialModem
       end
 
       ret = []
-      while m = @huawei_replies.shift
+      while m = @serial_replies.shift
         #puts "Reply: #{m}"
         ret.push m
         if m =~ /\+[\w]{4}: /
           code, msg = m[1..4], m[7..-1]
           #puts "found code #{code} - #{msg}"
-          @huawei_codes[code] = msg
+          @serial_codes[code] = msg
           case code
             when /CMGL/
               dp msg
-              sms_id, sms_flag, sms_number, sms_unknown, sms_data =
+              sms_id, sms_flag, sms_number, sms_unknown, sms_date =
                   msg.scan(/(".*?"|[^",]\s*|,,)/).flatten
               dp sms_id
-              ret.push @huawei_replies.shift
-              @huawei_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_data,
+              dp ret.push @serial_replies.shift
+              @serial_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_date,
                                      ret.last]
             when /CUSD/
               if pdu = msg.match(/.*\"(.*)\".*/)
@@ -73,7 +73,7 @@ module SerialModem
 
   def modem_send(str)
     ddputs(2){"Sending string #{str} to modem"}
-    @huawei_sp.write("#{str}\r\n")
+    @serial_sp.write("#{str}\r\n")
     read_reply(true)
   end
 
@@ -96,14 +96,14 @@ module SerialModem
   end
 
   def ussd_send(str)
-    raise 'USSDinprogress' if @huawei_ussd.size > 0
-    @huawei_ussd.push str
+    raise 'USSDinprogress' if @serial_ussd.size > 0
+    @serial_ussd.push str
     modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str)}\"")
   end
 
   def ussd_result(str)
-    cmd = @huawei_ussd.pop
-    @huawei_ussd_results[cmd] = str
+    cmd = @serial_ussd.pop
+    @serial_ussd_results[cmd] = str
     puts "#{cmd}: #{str}"
   end
 
@@ -119,17 +119,17 @@ module SerialModem
   end
 
   def sms_delete(number)
-    if @huawei_sms.has_key? number
+    if @serial_sms.has_key? number
       modem_send("AT+CMGD=#{number}")
-      @huawei_sms.delete number
+      @serial_sms.delete number
     end
   end
 
   def get_operator
     modem_send('AT+COPS=3,0')
     modem_send('AT+COPS?')
-    if @huawei_codes.has_key? 'COPS'
-      @huawei_codes['COPS'].scan(/(".*?"|[^",]\s*|,,)/)[2]
+    if @serial_codes.has_key? 'COPS'
+      @serial_codes['COPS'].scan(/(".*?"|[^",]\s*|,,)/)[2]
     end
   end
 
