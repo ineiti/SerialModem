@@ -5,8 +5,10 @@ module SerialModem
   extend self
 
   def setup
-    @serial_sp = SerialPort.new('/dev/ttyUSB2', 115200)
-    @serial_sp.read_timeout = 100
+    @serial_sp = nil
+    @serial_tty = '/dev/ttyUSB2'
+    @serial_tty_error = '/dev/ttyUSB3'
+    check_tty
     @serial_replies = []
     @serial_codes = {}
     @serial_sms = {}
@@ -23,6 +25,7 @@ module SerialModem
   end
 
   def read_reply(wait = false)
+    return unless check_tty
     @serial_mutex.synchronize {
       begin
         if wait
@@ -72,7 +75,8 @@ module SerialModem
   end
 
   def modem_send(str)
-    ddputs(2){"Sending string #{str} to modem"}
+    return unless check_tty
+    dputs(3) { "Sending string #{str} to modem" }
     @serial_sp.write("#{str}\r\n")
     read_reply(true)
   end
@@ -139,6 +143,27 @@ module SerialModem
 
   def traffic_statistics
 
+  end
+
+  def check_tty
+    if !@serial_sp
+      if File.exists? @serial_tty
+        log_msg :SerialModem, 'connecting modem'
+        @serial_sp = SerialPort.new(@serial_tty, 115200)
+        @serial_sp.read_timeout = 100
+      end
+    else
+      if ! File.exists? @serial_tty
+        log_msg :SerialModem, 'disconnecting modem'
+        @serial_sp.close
+        @serial_sp = nil
+        if File.exists? @serial_tty_error
+          log_msg :SerialModem, 'resetting modem'
+          %w( rmmod modprobe ).each{|cmd| System.run_bool( "#{cmd} option" ) }
+        end
+      end
+    end
+    @serial_sp
   end
 
 end
