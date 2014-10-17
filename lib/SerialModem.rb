@@ -5,14 +5,11 @@ module SerialModem
   extend self
 
   def setup
-    @serial_sp = nil
-    @serial_tty = '/dev/ttyUSB2'
-    @serial_tty_error = '/dev/ttyUSB3'
-    check_tty
+    @serial_tty = @serial_tty_error = @serial_sp = nil
     @serial_replies = []
     @serial_codes = {}
     @serial_sms = {}
-    @serial_ussd = []
+    @serial_ussd = nil
     @serial_ussd_results = {}
     @serial_mutex = Mutex.new
     @serial_thread = Thread.new {
@@ -21,7 +18,6 @@ module SerialModem
         sleep 0.5
       }
     }
-    modem_send('atz')
   end
 
   def read_reply(wait = false)
@@ -48,11 +44,11 @@ module SerialModem
 
       ret = []
       while m = @serial_replies.shift
-        #puts "Reply: #{m}"
+        puts "Reply: #{m}"
         ret.push m
         if m =~ /\+[\w]{4}: /
           code, msg = m[1..4], m[7..-1]
-          #puts "found code #{code} - #{msg}"
+          puts "found code #{code.inspect} - #{msg.inspect}"
           @serial_codes[code] = msg
           case code
             when /CMGL/
@@ -64,9 +60,13 @@ module SerialModem
               @serial_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_date,
                                      ret.last]
             when /CUSD/
+              dp msg
               if pdu = msg.match(/.*\"(.*)\".*/)
-                ussd_result(pdu_to_ussd(pdu[1]))
+                dp pdu.inspect
+                ussd_store_result(pdu_to_ussd(pdu[1]))
               end
+            when /CMTI/
+              # Probably a message or so - '+CMTI: "ME",0' is a new message
           end
         end
       end
@@ -76,7 +76,7 @@ module SerialModem
 
   def modem_send(str)
     return unless check_tty
-    dputs(3) { "Sending string #{str} to modem" }
+    ddputs(3) { "Sending string #{str} to modem" }
     @serial_sp.write("#{str}\r\n")
     read_reply(true)
   end
@@ -99,16 +99,30 @@ module SerialModem
         map { |s| [s+"0"].pack('b*') }.join
   end
 
-  def ussd_send(str)
-    raise 'USSDinprogress' if @serial_ussd.size > 0
-    @serial_ussd.push str
-    modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str)}\"")
+  def ussd_send(str, check = false)
+    if @serial_ussd
+      if check
+        raise 'USSDinprogress'
+      else
+        @serial_ussd = nil
+      end
+    end
+    str =~ /^\*.*\#$/ ? str_send = str : str_send = "*#{str}#"
+    ddputs(3) { "Sending ussd-string #{str_send}" }
+    @serial_ussd = str_send
+    modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"")
   end
 
-  def ussd_result(str)
-    cmd = @serial_ussd.pop
-    @serial_ussd_results[cmd] = str
-    puts "#{cmd}: #{str}"
+  def ussd_store_result(str)
+    cmd = @serial_ussd
+    @serial_ussd_results[@serial_ussd] = str
+    @serial_ussd = nil
+    dp "#{cmd}: #{str}"
+  end
+
+  def ussd_fetch(str)
+    str =~ /^\*.*\#$/ ? str_rcvd = "*#{str}#" : str_rcvd = str
+    @serial_ussd_results.has_key? str_rcvd ? @serial_ussd_results[str_rcvd] : nil
   end
 
   def sms_send(number, msg)
@@ -145,25 +159,52 @@ module SerialModem
 
   end
 
+  def init_modem
+    %w( ATZ
+    AT+CNMI=0,0,0,0,0
+    AT+CPMS="SM","SM","SM"
+    AT+CFUN=1
+    AT+CMGF=1 ).each { |at| modem_send(at) }
+  end
+
   def check_tty
-    if !@serial_sp
+    check_presence
+
+    if !@serial_sp && @serial_tty
       if File.exists? @serial_tty
         log_msg :SerialModem, 'connecting modem'
         @serial_sp = SerialPort.new(@serial_tty, 115200)
-        @serial_sp.read_timeout = 100
+        @serial_sp.read_timeout = 500
+        init_modem
       end
     else
-      if ! File.exists? @serial_tty
+      if @serial_tty && !File.exists?(@serial_tty)
         log_msg :SerialModem, 'disconnecting modem'
         @serial_sp.close
         @serial_sp = nil
+        @serial_ussd = nil
         if File.exists? @serial_tty_error
           log_msg :SerialModem, 'resetting modem'
-          %w( rmmod modprobe ).each{|cmd| System.run_bool( "#{cmd} option" ) }
+          %w( rmmod modprobe ).each { |cmd| System.run_bool("#{cmd} option") }
         end
       end
     end
     @serial_sp
   end
 
+  def check_presence
+    @serial_tty and File.exists?(@serial_tty) and return
+    case System.run_str('lsusb')
+      when /12d1:1506/, /12d1:14ac/, /12d1:1c05/
+        log_msg :SerialModem, 'Found 3G-modem with ttyUSB0-ttyUSB2'
+        @serial_tty_error = '/dev/ttyUSB3'
+        @serial_tty = '/dev/ttyUSB2'
+      when /airtel-modem/
+        log_msg :SerialModem, 'Found 3G-modem with ttyUSB0-ttyUSB4'
+        @serial_tty_error = '/dev/ttyUSB5'
+        @serial_tty = '/dev/ttyUSB4'
+      else
+        @serial_tty = @serial_tty_error = nil
+    end
+  end
 end
