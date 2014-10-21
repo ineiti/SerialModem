@@ -9,14 +9,28 @@ module SerialModem
     @serial_replies = []
     @serial_codes = {}
     @serial_sms = {}
-    @serial_ussd = nil
+    @serial_ussd = []
+    @serial_ussd_last = Time.now
+    @serial_ussd_timeout = 10
     @serial_ussd_results = {}
     @serial_mutex = Mutex.new
-    check_presence
+    check_presence and init_modem
     @serial_thread = Thread.new {
       loop {
-        read_reply
-        sleep 0.5
+        begin
+          read_reply
+          dp Time.now - @serial_ussd_last
+          if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
+              (@serial_ussd.length > 0)
+            log_msg :SerialModem, "Re-sending #{@serial_ussd.first}"
+            ussd_send_now
+          end
+          sleep 0.5
+        rescue Exception => e
+          puts "#{e.inspect}"
+          puts "#{e.to_s}"
+          puts e.backtrace
+        end
       }
     }
   end
@@ -42,42 +56,45 @@ module SerialModem
         puts "#{e.to_s}"
         puts e.backtrace
       end
+    }
 
-      ret = []
-      while m = @serial_replies.shift
-        dputs(3){ "Reply: #{m}"}
-        ret.push m
-        if m =~ /\+[\w]{4}: /
-          code, msg = m[1..4], m[7..-1]
-          dputs(2){ "found code #{code.inspect} - #{msg.inspect}"}
-          @serial_codes[code] = msg
-          case code
-            when /CMGL/
-              sms_id, sms_flag, sms_number, sms_unknown, sms_date =
-                  msg.scan(/(".*?"|[^",]\s*|,,)/).flatten
-              ret.push @serial_replies.shift
-              @serial_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_date,
-                                     ret.last]
-            when /CUSD/
-              if pdu = msg.match(/.*\"(.*)\".*/)
-                ussd_store_result(pdu_to_ussd(pdu[1]))
-              end
-            when /CMTI/
-              # Probably a message or so - '+CMTI: "ME",0' is a new message
-          end
+    ret = []
+    while m = @serial_replies.shift
+      next if (m == '' || m =~ /^\^/)
+      dputs(3) { "Reply: #{m}" }
+      ret.push m
+      if m =~ /\+[\w]{4}: /
+        code, msg = m[1..4], m[7..-1]
+        ddputs(2) { "found code #{code.inspect} - #{msg.inspect}" }
+        @serial_codes[code] = msg
+        case code
+          when /CMGL/
+            sms_id, sms_flag, sms_number, sms_unknown, sms_date =
+                msg.scan(/(".*?"|[^",]\s*|,,)/).flatten
+            ret.push @serial_replies.shift
+            @serial_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_date,
+                                   ret.last]
+          when /CUSD/
+            if pdu = msg.match(/.*\"(.*)\".*/)
+              ussd_store_result(pdu_to_ussd(pdu[1]))
+            end
+          when /CMTI/
+            # Probably a message or so - '+CMTI: "ME",0' is a new message
         end
       end
-      ret
-    }
+    end
+    ret
   end
 
   def modem_send(str)
+    dputs_func
     return unless check_tty
     dputs(3) { "Sending string #{str} to modem" }
     @serial_mutex.synchronize {
       @serial_sp.write("#{str}\r\n")
     }
     read_reply(true)
+    #read_reply
   end
 
   def switch_to_hilink
@@ -98,35 +115,31 @@ module SerialModem
         map { |s| [s+"0"].pack('b*') }.join
   end
 
-  def ussd_ensure_format(str)
-    str =~ /^\*.*\#$/ ? str : "*#{str}#"
-  end
-
-  def ussd_send(str, check = false)
-    if @serial_ussd
-      if check
-        raise 'USSDinprogress'
-      else
-        @serial_ussd = nil
-      end
-    end
-    str_send = ussd_ensure_format(str)
-    dputs(3) { "Sending ussd-string #{str_send} with add of #{@ussd_add}" }
-    @serial_ussd = str_send
+  def ussd_send_now
+    return unless @serial_ussd.length > 0
+    str_send = @serial_ussd.first
+    ddputs(3) { "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
+        "and queue #{@serial_ussd}" }
+    @serial_ussd_last = Time.now
     modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}")
   end
 
+  def ussd_send(str)
+    @serial_ussd.push str
+    ussd_send_now
+  end
+
   def ussd_store_result(str)
-    cmd = @serial_ussd
-    @serial_ussd_results[@serial_ussd] = str
-    @serial_ussd = nil
+    return nil unless @serial_ussd.length > 0
+    code = @serial_ussd.shift
+    ddputs(2) { "Got USSD-reply for #{code}: #{str}" }
+    @serial_ussd_results[code] = str
   end
 
   def ussd_fetch(str)
-    return unless @serial_ussd_results
-    str_rcvd = ussd_ensure_format str
-    dputs(3) { "Got str #{str} and made #{str_rcvd} - #{@serial_ussd_results.inspect}" }
-    @serial_ussd_results.has_key?(str_rcvd) ? @serial_ussd_results[str_rcvd] : nil
+    return nil unless @serial_ussd_results
+    dputs(3) { "Fetching str #{str} - #{@serial_ussd_results.inspect}" }
+    @serial_ussd_results.has_key?(str) ? @serial_ussd_results[str] : nil
   end
 
   def sms_send(number, msg)
@@ -140,8 +153,14 @@ module SerialModem
     modem_send('AT+CMGL="ALL"')
   end
 
+  def sms_list
+    @serial_sms
+  end
+
   def sms_delete(number)
+    dp "Asking to delete #{number} from #{@serial_sms.inspect}"
     if @serial_sms.has_key? number
+      dp "Deleting #{number}"
       modem_send("AT+CMGD=#{number}")
       @serial_sms.delete number
     end
@@ -178,7 +197,7 @@ module SerialModem
       if File.exists? @serial_tty
         log_msg :SerialModem, 'connecting modem'
         @serial_sp = SerialPort.new(@serial_tty, 115200)
-        @serial_sp.read_timeout = 500
+        @serial_sp.read_timeout = 10
         init_modem
       end
     else
