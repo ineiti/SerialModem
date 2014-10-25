@@ -2,6 +2,7 @@ require 'SerialModem/version'
 require 'serialport'
 
 module SerialModem
+  attr_accessor :serial_sms_new, :serial_sms_to_delete
   extend self
 
   def setup_modem
@@ -9,6 +10,8 @@ module SerialModem
     @serial_replies = []
     @serial_codes = {}
     @serial_sms = {}
+    @serial_sms_new = []
+    @serial_sms_to_delete = []
     @serial_ussd = []
     @serial_ussd_last = Time.now
     @serial_ussd_timeout = 10
@@ -18,8 +21,15 @@ module SerialModem
     @serial_thread = Thread.new {
       loop {
         begin
-          read_reply
-          dp Time.now - @serial_ussd_last
+          if read_reply.length == 0
+            @serial_sms_to_delete.each { |id|
+              log_msg :SerialModem, "Deleting sms #{id} afterwards"
+              sms_delete(id)
+            }
+            @serial_sms_to_delete = []
+          end
+
+          dputs(4) { (Time.now - @serial_ussd_last).to_s }
           if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
               (@serial_ussd.length > 0)
             log_msg :SerialModem, "Re-sending #{@serial_ussd.first}"
@@ -37,13 +47,14 @@ module SerialModem
 
   def read_reply(wait = false)
     return unless check_tty
-    @serial_mutex.synchronize {
-      begin
+    ret = []
+    begin
+      @serial_mutex.synchronize {
         if wait
           begin
             @serial_replies.push @serial_sp.readline
           rescue EOFError => e
-            log_msg :SerialModem, 'Waited for string, but got nothing'
+            #log_msg :SerialModem, 'Waited for string, but got nothing'
           end
         end
         if not @serial_sp.eof?
@@ -51,37 +62,43 @@ module SerialModem
             @serial_replies.push l.chomp
           }
         end
-      rescue Exception => e
-        puts "#{e.inspect}"
-        puts "#{e.to_s}"
-        puts e.backtrace
-      end
-    }
+      }
 
-    ret = []
-    while m = @serial_replies.shift
-      next if (m == '' || m =~ /^\^/)
-      dputs(3) { "Reply: #{m}" }
-      ret.push m
-      if m =~ /\+[\w]{4}: /
-        code, msg = m[1..4], m[7..-1]
-        ddputs(2) { "found code #{code.inspect} - #{msg.inspect}" }
-        @serial_codes[code] = msg
-        case code
-          when /CMGL/
-            sms_id, sms_flag, sms_number, sms_unknown, sms_date =
-                msg.scan(/(".*?"|[^",]\s*|,,)/).flatten
-            ret.push @serial_replies.shift
-            @serial_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_date,
-                                   ret.last]
-          when /CUSD/
-            if pdu = msg.match(/.*\"(.*)\".*/)
-              ussd_store_result(pdu_to_ussd(pdu[1]))
-            end
-          when /CMTI/
-            # Probably a message or so - '+CMTI: "ME",0' is a new message
+      while m = @serial_replies.shift
+        next if (m == '' || m =~ /^\^/)
+        dputs(3) { "Reply: #{m}" }
+        ret.push m
+        if m =~ /\+[\w]{4}: /
+          code, msg = m[1..4], m[7..-1]
+          dputs(2) { "found code #{code.inspect} - #{msg.inspect}" }
+          @serial_codes[code] = msg
+          case code
+            when /CMGL/
+              sms_id, sms_flag, sms_number, sms_unknown, sms_date =
+                  dp msg.scan(/(".*?"|[^",]+\s*|,,)/).flatten
+              ret.push @serial_replies.shift
+              @serial_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_date,
+                                     ret.last]
+              @serial_sms_new.each { |s|
+                s.call(@serial_sms, sms_id)
+              }
+            when /CUSD/
+              if pdu = msg.match(/.*\"(.*)\".*/)
+                ussd_store_result(pdu_to_ussd(pdu[1]))
+              end
+            when /CMTI/
+              if msg =~ /^.CMTI: .ME.,/
+                dputs(2){"I think I got a new message: #{msg}"}
+                sms_scan
+              end
+              # Probably a message or so - '+CMTI: "ME",0' is a new message
+          end
         end
       end
+    rescue Exception => e
+      puts "#{e.inspect}"
+      puts "#{e.to_s}"
+      puts e.backtrace
     end
     ret
   end
@@ -125,15 +142,17 @@ module SerialModem
   end
 
   def ussd_send(str)
+    ddputs(3){"Sending ussd-code #{str}"}
     @serial_ussd.push str
-    ussd_send_now
+    @serial_ussd.length == 1 and ussd_send_now
   end
 
   def ussd_store_result(str)
     return nil unless @serial_ussd.length > 0
     code = @serial_ussd.shift
-    ddputs(2) { "Got USSD-reply for #{code}: #{str}" }
+    dputs(2) { "Got USSD-reply for #{code}: #{str}" }
     @serial_ussd_results[code] = str
+    ussd_send_now
   end
 
   def ussd_fetch(str)
@@ -158,9 +177,9 @@ module SerialModem
   end
 
   def sms_delete(number)
-    dp "Asking to delete #{number} from #{@serial_sms.inspect}"
+    dputs(2) { "Asking to delete #{number} from #{@serial_sms.inspect}" }
     if @serial_sms.has_key? number
-      dp "Deleting #{number}"
+      dputs(3) { "Deleting #{number}" }
       modem_send("AT+CMGD=#{number}")
       @serial_sms.delete number
     end
