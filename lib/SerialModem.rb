@@ -2,7 +2,7 @@ require 'SerialModem/version'
 require 'serialport'
 
 module SerialModem
-  attr_accessor :serial_sms_new, :serial_sms_to_delete
+  attr_accessor :serial_sms_new, :serial_sms_to_delete, :serial_sms
   extend self
 
   def setup_modem
@@ -29,7 +29,7 @@ module SerialModem
             @serial_sms_to_delete = []
           end
 
-          dputs(4) { (Time.now - @serial_ussd_last).to_s }
+          ddputs(4) { (Time.now - @serial_ussd_last).to_s }
           if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
               (@serial_ussd.length > 0)
             log_msg :SerialModem, "Re-sending #{@serial_ussd.first}"
@@ -66,7 +66,7 @@ module SerialModem
 
       while m = @serial_replies.shift
         next if (m == '' || m =~ /^\^/)
-        dputs(3) { "Reply: #{m}" }
+        ddputs(3) { "Reply: #{m}" }
         ret.push m
         if m =~ /\+[\w]{4}: /
           code, msg = m[1..4], m[7..-1]
@@ -170,10 +170,6 @@ module SerialModem
   def sms_scan
     modem_send('AT+CMGF=1')
     modem_send('AT+CMGL="ALL"')
-  end
-
-  def sms_list
-    @serial_sms
   end
 
   def sms_delete(number)
