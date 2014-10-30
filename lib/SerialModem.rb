@@ -5,7 +5,7 @@ module SerialModem
   attr_accessor :serial_sms_new, :serial_sms_to_delete, :serial_sms
   extend self
 
-  def setup_modem
+  def setup_modem(dev)
     @serial_tty = @serial_tty_error = @serial_sp = nil
     @serial_replies = []
     @serial_codes = {}
