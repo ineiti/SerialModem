@@ -29,7 +29,7 @@ module SerialModem
             @serial_sms_to_delete = []
           end
 
-          ddputs(4) { (Time.now - @serial_ussd_last).to_s }
+          dputs(4) { (Time.now - @serial_ussd_last).to_s }
           if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
               (@serial_ussd.length > 0)
             log_msg :SerialModem, "Re-sending #{@serial_ussd.first}"
@@ -66,7 +66,7 @@ module SerialModem
 
       while m = @serial_replies.shift
         next if (m == '' || m =~ /^\^/)
-        ddputs(3) { "Reply: #{m}" }
+        dputs(3) { "Reply: #{m}" }
         ret.push m
         if m =~ /\+[\w]{4}: /
           code, msg = m[1..4], m[7..-1]
@@ -104,7 +104,7 @@ module SerialModem
   end
 
   def modem_send(str)
-    dputs_func
+    #dputs_func
     return unless check_tty
     dputs(3) { "Sending string #{str} to modem" }
     @serial_mutex.synchronize {
@@ -135,14 +135,14 @@ module SerialModem
   def ussd_send_now
     return unless @serial_ussd.length > 0
     str_send = @serial_ussd.first
-    ddputs(3) { "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
+    dputs(3) { "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
         "and queue #{@serial_ussd}" }
     @serial_ussd_last = Time.now
     modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}")
   end
 
   def ussd_send(str)
-    ddputs(3){"Sending ussd-code #{str}"}
+    dputs(3){"Sending ussd-code #{str}"}
     @serial_ussd.push str
     @serial_ussd.length == 1 and ussd_send_now
   end
@@ -184,9 +184,14 @@ module SerialModem
   def get_operator
     modem_send('AT+COPS=3,0')
     modem_send('AT+COPS?')
-    if @serial_codes.has_key? 'COPS'
-      @serial_codes['COPS'].scan(/(".*?"|[^",]\s*|,,)/)[2]
-    end
+    (1..6).each{
+      if @serial_codes.has_key? 'COPS'
+        return '' if @serial_codes['COPS'] == '0'
+        return @serial_codes['COPS'].scan(/".*?"|[^",]\s*|,,/)[2].gsub(/"/,'')
+      end
+      sleep 0.5
+    }
+    return ''
   end
 
   def set_connection_type(net)
