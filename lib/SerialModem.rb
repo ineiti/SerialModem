@@ -14,7 +14,7 @@ module SerialModem
     @serial_sms_to_delete = []
     @serial_ussd = []
     @serial_ussd_last = Time.now
-    @serial_ussd_timeout = 10
+    @serial_ussd_timeout = 30
     @serial_ussd_results = {}
     @serial_mutex = Mutex.new
     check_presence and init_modem
@@ -88,10 +88,10 @@ module SerialModem
               end
             when /CMTI/
               if msg =~ /^.CMTI: .ME.,/
-                dputs(2){"I think I got a new message: #{msg}"}
+                dputs(2) { "I think I got a new message: #{msg}" }
                 sms_scan
               end
-              # Probably a message or so - '+CMTI: "ME",0' is a new message
+            # Probably a message or so - '+CMTI: "ME",0' is a new message
           end
         end
       end
@@ -107,9 +107,16 @@ module SerialModem
     #dputs_func
     return unless check_tty
     dputs(3) { "Sending string #{str} to modem" }
+    check = false
     @serial_mutex.synchronize {
-      @serial_sp.write("#{str}\r\n")
+      begin
+        @serial_sp.write("#{str}\r\n")
+      rescue Errno::EIO => e
+        log_msg :SerialModem, "Couldn't write to device"
+        check = true
+      end
     }
+    check and check_presence
     read_reply(true)
     #read_reply
   end
@@ -142,7 +149,7 @@ module SerialModem
   end
 
   def ussd_send(str)
-    dputs(3){"Sending ussd-code #{str}"}
+    dputs(3) { "Sending ussd-code #{str}" }
     @serial_ussd.push str
     @serial_ussd.length == 1 and ussd_send_now
   end
@@ -184,10 +191,10 @@ module SerialModem
   def get_operator
     modem_send('AT+COPS=3,0')
     modem_send('AT+COPS?')
-    (1..6).each{
+    (1..6).each {
       if @serial_codes.has_key? 'COPS'
         return '' if @serial_codes['COPS'] == '0'
-        return @serial_codes['COPS'].scan(/".*?"|[^",]\s*|,,/)[2].gsub(/"/,'')
+        return @serial_codes['COPS'].scan(/".*?"|[^",]\s*|,,/)[2].gsub(/"/, '')
       end
       sleep 0.5
     }
