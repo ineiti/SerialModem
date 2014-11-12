@@ -21,6 +21,7 @@ module SerialModem
     @serial_thread = Thread.new {
       loop {
         begin
+          ddputs(5){'Reading out modem'}
           if read_reply.length == 0
             @serial_sms_to_delete.each { |id|
               log_msg :SerialModem, "Deleting sms #{id} afterwards"
@@ -36,6 +37,9 @@ module SerialModem
             ussd_send_now
           end
           sleep 0.5
+        rescue IOError
+          log_msg :SerialModem, 'IOError - killing modem'
+          return
         rescue Exception => e
           puts "#{e.inspect}"
           puts "#{e.to_s}"
@@ -46,7 +50,7 @@ module SerialModem
   end
 
   def read_reply(wait = false)
-    return unless check_tty
+    raise IOError.new('NoModemHere') unless check_tty
     ret = []
     begin
       @serial_mutex.synchronize {
@@ -95,6 +99,8 @@ module SerialModem
           end
         end
       end
+    rescue IOError => e
+      raise e
     rescue Exception => e
       puts "#{e.inspect}"
       puts "#{e.to_s}"
@@ -228,12 +234,13 @@ module SerialModem
         init_modem
       end
     else
-      if @serial_tty && !File.exists?(@serial_tty)
+      if @serial_sp &&
+          (!@serial_tty||(@serial_tty && !File.exists?(@serial_tty)))
         log_msg :SerialModem, 'disconnecting modem'
         @serial_sp.close
         @serial_sp = nil
         @serial_ussd = nil
-        if File.exists? @serial_tty_error
+        if @serial_tty_error && File.exists?(@serial_tty_error)
           log_msg :SerialModem, 'resetting modem'
           %w( rmmod modprobe ).each { |cmd| System.run_bool("#{cmd} option") }
         end
@@ -260,5 +267,18 @@ module SerialModem
           @serial_tty = @serial_tty_error = nil
       end
     }
+  end
+
+  def kill
+    if @serial_thread
+      if @serial_thread.alive?
+        ddputs(3){'Killing thread'}
+        @serial_thread.kill
+        ddputs(3){'Joining thread'}
+        @serial_thread.join
+      end
+    end
+    @serial_sp and @serial_sp = nil
+    ddputs(3){'SerialModem killed'}
   end
 end
