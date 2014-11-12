@@ -21,7 +21,7 @@ module SerialModem
     @serial_thread = Thread.new {
       loop {
         begin
-          ddputs(5){'Reading out modem'}
+          dputs(5){'Reading out modem'}
           if read_reply.length == 0
             @serial_sms_to_delete.each { |id|
               log_msg :SerialModem, "Deleting sms #{id} afterwards"
@@ -79,7 +79,7 @@ module SerialModem
           case code
             when /CMGL/
               sms_id, sms_flag, sms_number, sms_unknown, sms_date =
-                  dp msg.scan(/(".*?"|[^",]+\s*|,,)/).flatten
+                  msg.scan(/(".*?"|[^",]+\s*|,,)/).flatten
               ret.push @serial_replies.shift
               @serial_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_date,
                                      ret.last]
@@ -272,13 +272,13 @@ module SerialModem
   def kill
     if @serial_thread
       if @serial_thread.alive?
-        ddputs(3){'Killing thread'}
+        dputs(3){'Killing thread'}
         @serial_thread.kill
-        ddputs(3){'Joining thread'}
+        dputs(3){'Joining thread'}
         @serial_thread.join
       end
     end
     @serial_sp and @serial_sp = nil
-    ddputs(3){'SerialModem killed'}
+    dputs(3){'SerialModem killed'}
   end
 end
