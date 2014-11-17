@@ -4,9 +4,8 @@ $LOAD_PATH.push '../lib'
 require 'serialmodem'
 include SerialModem
 
-
-modem_setup
-puts get_operator
+setup_modem nil
+check_presence
 #sleep 1
 #ussd_send('*128#')
 #sms_send('93999699', 'SMS from Dreamplug')
