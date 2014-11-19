@@ -1,0 +1,10 @@
+#!/bin/bash
+RP=""
+for a in HilinkModem SerialModem HelperClasses; do
+  RP="$RP -I../../$a/lib"
+done
+for a in activesupport-3.1.1 i18n-0.6.0; do
+  RP="$RP -I../../QooxView/libs/$a/lib"
+done
+echo $RP
+ruby $RP $1
