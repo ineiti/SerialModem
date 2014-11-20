@@ -25,7 +25,7 @@ module SerialModem
     @serial_thread = Thread.new {
       loop {
         begin
-          dputs(5){'Reading out modem'}
+          dputs(5) { 'Reading out modem' }
           if read_reply.length == 0
             @serial_sms_to_delete.each { |id|
               log_msg :SerialModem, "Deleting sms #{id} afterwards"
@@ -53,22 +53,19 @@ module SerialModem
     }
   end
 
-  def read_reply(wait = false)
+  def read_reply(wait = nil)
     raise IOError.new('NoModemHere') unless check_tty
     ret = []
     begin
       @serial_mutex.synchronize {
-        if wait
+        while !@serial_sp.eof? || wait
           begin
-            @serial_replies.push @serial_sp.readline
+            @serial_replies.push rep = @serial_sp.readline.chomp
+            break if rep == wait
           rescue EOFError => e
-            #log_msg :SerialModem, 'Waited for string, but got nothing'
+            dputs(4) { 'Waited for string, but got nothing' }
+            break
           end
-        end
-        if not @serial_sp.eof?
-          @serial_sp.readlines.each { |l|
-            @serial_replies.push l.chomp
-          }
         end
       }
 
@@ -91,7 +88,9 @@ module SerialModem
                 s.call(@serial_sms, sms_id)
               }
             when /CUSD/
+              dp 'cusd'
               if pdu = msg.match(/.*\"(.*)\".*/)
+                dp 'ussd_store'
                 ussd_store_result(pdu_to_ussd(pdu[1]))
               end
             when /CMTI/
@@ -113,7 +112,7 @@ module SerialModem
     ret
   end
 
-  def modem_send(str)
+  def modem_send(str, reply = true)
     #dputs_func
     return unless check_tty
     dputs(3) { "Sending string #{str} to modem" }
@@ -127,16 +126,16 @@ module SerialModem
       end
     }
     check and check_presence
-    read_reply(true)
+    read_reply(reply)
     #read_reply
   end
 
   def switch_to_hilink
-    modem_send('AT^U2DIAG=119')
+    modem_send('AT^U2DIAG=119', 'OK')
   end
 
   def save_modem
-    modem_send('AT^U2DIAG=0')
+    modem_send('AT^U2DIAG=0', 'OK')
   end
 
   def ussd_to_pdu(str)
@@ -155,7 +154,7 @@ module SerialModem
     dputs(3) { "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
         "and queue #{@serial_ussd}" }
     @serial_ussd_last = Time.now
-    modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}")
+    modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
   end
 
   def ussd_send(str)
@@ -165,6 +164,7 @@ module SerialModem
   end
 
   def ussd_store_result(str)
+    dp "store: #{@serial_ussd.inspect}"
     return nil unless @serial_ussd.length > 0
     code = @serial_ussd.shift
     dputs(2) { "Got USSD-reply for #{code}: #{str}" }
@@ -179,28 +179,28 @@ module SerialModem
   end
 
   def sms_send(number, msg)
-    modem_send('AT+CMGF=1')
+    modem_send('AT+CMGF=1', 'OK')
     modem_send("AT+CMGS=\"#{number}\"")
-    modem_send("#{msg}\x1a")
+    modem_send("#{msg}\x1a", 'OK')
   end
 
   def sms_scan
-    modem_send('AT+CMGF=1')
-    modem_send('AT+CMGL="ALL"')
+    modem_send('AT+CMGF=1', 'OK')
+    modem_send('AT+CMGL="ALL"', 'OK')
   end
 
   def sms_delete(number)
     dputs(2) { "Asking to delete #{number} from #{@serial_sms.inspect}" }
     if @serial_sms.has_key? number
       dputs(3) { "Deleting #{number}" }
-      modem_send("AT+CMGD=#{number}")
+      modem_send("AT+CMGD=#{number}", 'OK')
       @serial_sms.delete number
     end
   end
 
   def get_operator
-    modem_send('AT+COPS=3,0')
-    modem_send('AT+COPS?')
+    modem_send('AT+COPS=3,0', 'OK')
+    modem_send('AT+COPS?', 'OK')
     (1..6).each {
       if @serial_codes.has_key? 'COPS'
         return '' if @serial_codes['COPS'] == '0'
@@ -211,8 +211,11 @@ module SerialModem
     return ''
   end
 
-  def set_connection_type(net)
-
+  def set_connection_type(net, modem = :e303)
+    # According to https://wiki.archlinux.org/index.php/3G_and_GPRS_modems_with_pppd
+    cmds = {e303: {c3go: '14,2,3FFFFFFF,0,2', c3g: '2,2,3FFFFFFF,0,2',
+                   c2go: '13,1,3FFFFFFF,0,2', c2g: '2,1,3FFFFFFF,0,2'}}
+    modem_send "AT^SYSCFG=#{cmds[modem]["c#{net}".to_sym]}", 'OK'
   end
 
   def traffic_statistics
@@ -224,7 +227,8 @@ module SerialModem
     AT+CNMI=0,0,0,0,0
     AT+CPMS="SM","SM","SM"
     AT+CFUN=1
-    AT+CMGF=1 ).each { |at| modem_send(at) }
+    AT+CMGF=1 ).each { |at| modem_send(at, 'OK') }
+    set_connection_type '3g'
   end
 
   def check_tty
@@ -234,7 +238,7 @@ module SerialModem
       if File.exists? @serial_tty
         log_msg :SerialModem, 'connecting modem'
         @serial_sp = SerialPort.new(@serial_tty, 115200)
-        @serial_sp.read_timeout = 10
+        @serial_sp.read_timeout = 500
         init_modem
       end
     else
@@ -276,13 +280,13 @@ module SerialModem
   def kill
     if @serial_thread
       if @serial_thread.alive?
-        dputs(3){'Killing thread'}
+        dputs(3) { 'Killing thread' }
         @serial_thread.kill
-        dputs(3){'Joining thread'}
+        dputs(3) { 'Joining thread' }
         @serial_thread.join
       end
     end
     @serial_sp and @serial_sp = nil
-    dputs(3){'SerialModem killed'}
+    dputs(3) { 'SerialModem killed' }
   end
 end
