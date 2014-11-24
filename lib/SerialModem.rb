@@ -88,15 +88,18 @@ module SerialModem
                 s.call(@serial_sms, sms_id)
               }
             when /CUSD/
-              dp 'cusd'
               if pdu = msg.match(/.*\"(.*)\".*/)
-                dp 'ussd_store'
                 ussd_store_result(pdu_to_ussd(pdu[1]))
+              else
+                log_msg :serialmodem, "Unknown: CUSD - #{msg}"
               end
             when /CMTI/
               if msg =~ /^.ME.,/
                 dputs(2) { "I think I got a new message: #{msg}" }
+                sleep 1
                 sms_scan
+              else
+                log_msg :serialmodem, "Unknown: CMTI - #{msg}"
               end
             # Probably a message or so - '+CMTI: "ME",0' is a new message
           end
@@ -150,7 +153,7 @@ module SerialModem
   def ussd_send_now
     return unless @serial_ussd.length > 0
     str_send = @serial_ussd.first
-    dputs(3) { "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
+    dputs(2) { "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
         "and queue #{@serial_ussd}" }
     @serial_ussd_last = Time.now
     modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
@@ -163,12 +166,14 @@ module SerialModem
   end
 
   def ussd_store_result(str)
-    dp "store: #{@serial_ussd.inspect}"
-    return nil unless @serial_ussd.length > 0
-    code = @serial_ussd.shift
-    dputs(2) { "Got USSD-reply for #{code}: #{str}" }
-    @serial_ussd_results[code] = str
-    ussd_send_now
+    if @serial_ussd.length > 0
+      code = @serial_ussd.shift
+      dputs(2) { "Got USSD-reply for #{code}: #{str}" }
+      @serial_ussd_results[code] = str
+      ussd_send_now
+    else
+      log_msg :serialmodem, "Got unasked code #{str}"
+    end
   end
 
   def ussd_fetch(str)
