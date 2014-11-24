@@ -94,7 +94,7 @@ module SerialModem
                 ussd_store_result(pdu_to_ussd(pdu[1]))
               end
             when /CMTI/
-              if msg =~ /^.CMTI: .ME.,/
+              if msg =~ /^.ME.,/
                 dputs(2) { "I think I got a new message: #{msg}" }
                 sms_scan
               end
@@ -113,7 +113,6 @@ module SerialModem
   end
 
   def modem_send(str, reply = true)
-    #dputs_func
     return unless check_tty
     dputs(3) { "Sending string #{str} to modem" }
     check = false
@@ -158,7 +157,7 @@ module SerialModem
   end
 
   def ussd_send(str)
-    dputs(3) { "Sending ussd-code #{str}" }
+    dputs(2) { "Sending ussd-code #{str}" }
     @serial_ussd.push str
     @serial_ussd.length == 1 and ussd_send_now
   end
