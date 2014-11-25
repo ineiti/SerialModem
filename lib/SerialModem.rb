@@ -3,7 +3,9 @@ require 'serialport'
 require 'helperclasses'
 
 module SerialModem
-  attr_accessor :serial_sms_new, :serial_sms_to_delete, :serial_sms
+  DEBUG_LVL = 1
+  attr_accessor :serial_sms_new, :serial_sms_to_delete, :serial_sms,
+                :serial_ussd_new
   extend self
   include HelperClasses
   include HelperClasses::DPuts
@@ -16,19 +18,23 @@ module SerialModem
     @serial_sms = {}
     @serial_sms_new = []
     @serial_sms_to_delete = []
+    @serial_sms_autoscan = 10
+    @serial_sms_autoscan_last = Time.now
     @serial_ussd = []
     @serial_ussd_last = Time.now
     @serial_ussd_timeout = 30
     @serial_ussd_results = {}
+    @serial_ussd_new = []
     @serial_mutex = Mutex.new
     check_presence and init_modem
     @serial_thread = Thread.new {
+      #dputs_func
       loop {
         begin
           dputs(5) { 'Reading out modem' }
           if read_reply.length == 0
             @serial_sms_to_delete.each { |id|
-              log_msg :SerialModem, "Deleting sms #{id} afterwards"
+              dputs(3) { "Deleting sms #{id} afterwards" }
               sms_delete(id)
             }
             @serial_sms_to_delete = []
@@ -40,6 +46,14 @@ module SerialModem
             log_msg :SerialModem, "Re-sending #{@serial_ussd.first}"
             ussd_send_now
           end
+
+          if @serial_sms_autoscan > 0 &&
+              Time.now - @serial_sms_autoscan_last > @serial_sms_autoscan
+            dputs(3) { 'Auto-scanning sms' }
+            sms_scan
+            @serial_sms_autoscan_last = Time.now
+          end
+
           sleep 0.5
         rescue IOError
           log_msg :SerialModem, 'IOError - killing modem'
@@ -89,7 +103,13 @@ module SerialModem
               }
             when /CUSD/
               if pdu = msg.match(/.*\"(.*)\".*/)
-                ussd_store_result(pdu_to_ussd(pdu[1]))
+                code = ussd_store_result(str = pdu_to_ussd(pdu[1]))
+                @serial_ussd_new.each { |s|
+                  s.call(code, str)
+                }
+              elsif msg == '2'
+                log_msg :serialmodem, 'Closed USSD again'
+                ussd_close
               else
                 log_msg :serialmodem, "Unknown: CUSD - #{msg}"
               end
@@ -153,16 +173,34 @@ module SerialModem
   def ussd_send_now
     return unless @serial_ussd.length > 0
     str_send = @serial_ussd.first
-    dputs(2) { "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
-        "and queue #{@serial_ussd}" }
     @serial_ussd_last = Time.now
-    modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
+    if str_send
+      dputs(2) { "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
+          "and queue #{@serial_ussd}" }
+      modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
+    else
+      dputs(2) { 'Sending ussd-close' }
+      @serial_ussd.shift
+      ussd_close
+    end
+  end
+
+  def ussd_close
+    modem_send("AT+CUSD=2#{@ussd_add}", 'OK')
+    @serial_ussd.length > 0 and ussd_send_now
   end
 
   def ussd_send(str)
-    dputs(2) { "Sending ussd-code #{str}" }
-    @serial_ussd.push str
-    @serial_ussd.length == 1 and ussd_send_now
+    if str.class == String
+      dputs(2) { "Sending ussd-code #{str}" }
+      @serial_ussd.push str
+      @serial_ussd.length == 1 and ussd_send_now
+    elsif str.class == Array
+      dputs(2) { "Sending menu-command #{str}" }
+      @serial_ussd.concat str
+      @serial_ussd.push nil
+      @serial_ussd.length == str.length + 1 and ussd_send_now
+    end
   end
 
   def ussd_store_result(str)
@@ -171,8 +209,10 @@ module SerialModem
       dputs(2) { "Got USSD-reply for #{code}: #{str}" }
       @serial_ussd_results[code] = str
       ussd_send_now
+      code
     else
       log_msg :serialmodem, "Got unasked code #{str}"
+      'unknown'
     end
   end
 
@@ -194,7 +234,7 @@ module SerialModem
   end
 
   def sms_delete(number)
-    dputs(2) { "Asking to delete #{number} from #{@serial_sms.inspect}" }
+    dputs(3) { "Asking to delete #{number} from #{@serial_sms.inspect}" }
     if @serial_sms.has_key? number
       dputs(3) { "Deleting #{number}" }
       modem_send("AT+CMGD=#{number}", 'OK')

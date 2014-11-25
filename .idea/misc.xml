@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="ProjectRootManager" version="2" project-jdk-name="ruby-2.0.0-p247" project-jdk-type="RUBY_SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="ruby-1.8.7-p249" project-jdk-type="RUBY_SDK" />
   <component name="SvnConfiguration" maxAnnotateRevisions="500" myUseAcceleration="nothing" myAutoUpdateAfterCommit="false" cleanupOnStartRun="false" SSL_PROTOCOLS="sslv3">
     <option name="USER" value="" />
     <option name="PASSWORD" value="" />
