@@ -145,6 +145,9 @@ module SerialModem
       rescue Errno::EIO => e
         log_msg :SerialModem, "Couldn't write to device"
         check = true
+      rescue Errno::ENODEV => e
+        log_msg :SerialModem, 'Device is not here anymore'
+        check = true
       end
     }
     check and check_presence
