@@ -261,7 +261,7 @@ module SerialModem
   def set_connection_type(net, modem = :e303)
     # According to https://wiki.archlinux.org/index.php/3G_and_GPRS_modems_with_pppd
     cmds = {e303: {c3go: '14,2,3FFFFFFF,0,2', c3g: '2,2,3FFFFFFF,0,2',
-                   c2go: '13,1,3FFFFFFF,0,2', c2g: '2,1,3FFFFFFF,0,2'}}
+        c2go: '13,1,3FFFFFFF,0,2', c2g: '2,1,3FFFFFFF,0,2'}}
     modem_send "AT^SYSCFG=#{cmds[modem]["c#{net}".to_sym]}", 'OK'
   end
 
@@ -307,6 +307,8 @@ module SerialModem
   def check_presence
     @serial_mutex.synchronize {
       @serial_tty and File.exists?(@serial_tty) and return
+      log_msg( :SerialModem, "serial_tty is #{@serial_tty} and exists " +
+          "#{File.exists?(@serial_tty.to_s)}")
       case lsusb = System.run_str('lsusb')
         when /12d1:1506/, /12d1:14ac/, /12d1:1c05/
           log_msg :SerialModem, 'Found 3G-modem with ttyUSB0-ttyUSB2'
