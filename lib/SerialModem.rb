@@ -261,7 +261,7 @@ module SerialModem
   def set_connection_type(net, modem = :e303)
     # According to https://wiki.archlinux.org/index.php/3G_and_GPRS_modems_with_pppd
     cmds = {e303: {c3go: '14,2,3FFFFFFF,0,2', c3g: '2,2,3FFFFFFF,0,2',
-        c2go: '13,1,3FFFFFFF,0,2', c2g: '2,1,3FFFFFFF,0,2'}}
+                   c2go: '13,1,3FFFFFFF,0,2', c2g: '2,1,3FFFFFFF,0,2'}}
     modem_send "AT^SYSCFG=#{cmds[modem]["c#{net}".to_sym]}", 'OK'
   end
 
@@ -281,33 +281,33 @@ module SerialModem
   def check_tty
     check_presence
 
-    if !@serial_sp && @serial_tty
+    if @serial_tty_error && File.exists?(@serial_tty_error)
+      log_msg :SerialModem, 'resetting modem'
+      %w( rmmod modprobe ).each { |cmd| System.run_bool("#{cmd} option") }
+      @serial_sp and @serial_sp.close
+      @serial_sp = nil
+    elsif !@serial_sp && @serial_tty
       if File.exists? @serial_tty
         log_msg :SerialModem, 'connecting modem'
         @serial_sp = SerialPort.new(@serial_tty, 115200)
         @serial_sp.read_timeout = 500
         init_modem
       end
-    else
-      if @serial_sp &&
-          (!@serial_tty||(@serial_tty && !File.exists?(@serial_tty)))
-        log_msg :SerialModem, 'disconnecting modem'
-        @serial_sp.close
-        @serial_sp = nil
-        @serial_ussd = nil
-        if @serial_tty_error && File.exists?(@serial_tty_error)
-          log_msg :SerialModem, 'resetting modem'
-          %w( rmmod modprobe ).each { |cmd| System.run_bool("#{cmd} option") }
-        end
-      end
+    elsif @serial_sp &&
+        (!@serial_tty||(@serial_tty && !File.exists?(@serial_tty)))
+      log_msg :SerialModem, 'disconnecting modem'
+      @serial_sp.close
+      @serial_sp = nil
+      @serial_ussd = nil
     end
+
     @serial_sp
   end
 
   def check_presence
     @serial_mutex.synchronize {
       @serial_tty and File.exists?(@serial_tty) and return
-      log_msg( :SerialModem, "serial_tty is #{@serial_tty} and exists " +
+      log_msg(:SerialModem, "serial_tty is #{@serial_tty} and exists " +
           "#{File.exists?(@serial_tty.to_s)}")
       case lsusb = System.run_str('lsusb')
         when /12d1:1506/, /12d1:14ac/, /12d1:1c05/
@@ -338,4 +338,5 @@ module SerialModem
     @serial_sp and @serial_sp = nil
     dputs(3) { 'SerialModem killed' }
   end
+
 end
