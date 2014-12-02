@@ -18,7 +18,7 @@ module SerialModem
     @serial_sms = {}
     @serial_sms_new = []
     @serial_sms_to_delete = []
-    @serial_sms_autoscan = 10
+    @serial_sms_autoscan = 20
     @serial_sms_autoscan_last = Time.now
     @serial_ussd = []
     @serial_ussd_last = Time.now
@@ -47,12 +47,7 @@ module SerialModem
             ussd_send_now
           end
 
-          if @serial_sms_autoscan > 0 &&
-              Time.now - @serial_sms_autoscan_last > @serial_sms_autoscan
-            dputs(3) { 'Auto-scanning sms' }
-            sms_scan
-            @serial_sms_autoscan_last = Time.now
-          end
+          sms_scan
 
           sleep 0.5
         rescue IOError
@@ -103,21 +98,18 @@ module SerialModem
               }
             when /CUSD/
               if pdu = msg.match(/.*\"(.*)\".*/)
-                code = ussd_store_result(str = pdu_to_ussd(pdu[1]))
-                @serial_ussd_new.each { |s|
-                  s.call(code, str)
-                }
+                ussd_received(pdu_to_ussd(pdu[1]))
               elsif msg == '2'
-                log_msg :serialmodem, 'Closed USSD again'
-                ussd_close
+                log_msg :serialmodem, 'Closed USSD.'
+                ussd_received('')
+                #ussd_close
               else
                 log_msg :serialmodem, "Unknown: CUSD - #{msg}"
               end
             when /CMTI/
               if msg =~ /^.ME.,/
                 dputs(2) { "I think I got a new message: #{msg}" }
-                sleep 1
-                sms_scan
+                sms_scan true
               else
                 log_msg :serialmodem, "Unknown: CMTI - #{msg}"
               end
@@ -219,6 +211,14 @@ module SerialModem
     end
   end
 
+  def ussd_received(str)
+    code = ussd_store_result(str)
+    dputs(2) { "Got result for #{code}: -#{str}-" }
+    @serial_ussd_new.each { |s|
+      s.call(code, str)
+    }
+  end
+
   def ussd_fetch(str)
     return nil unless @serial_ussd_results
     dputs(3) { "Fetching str #{str} - #{@serial_ussd_results.inspect}" }
@@ -231,9 +231,14 @@ module SerialModem
     modem_send("#{msg}\x1a", 'OK')
   end
 
-  def sms_scan
-    modem_send('AT+CMGF=1', 'OK')
-    modem_send('AT+CMGL="ALL"', 'OK')
+  def sms_scan(force = false)
+    if force || (@serial_sms_autoscan > 0 &&
+        Time.now - @serial_sms_autoscan_last > @serial_sms_autoscan)
+      dputs(3) { 'Auto-scanning sms' }
+      @serial_sms_autoscan_last = Time.now
+      modem_send('AT+CMGF=1', 'OK')
+      modem_send('AT+CMGL="ALL"', 'OK')
+    end
   end
 
   def sms_delete(number)
