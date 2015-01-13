@@ -11,7 +11,7 @@ module SerialModem
   include HelperClasses::DPuts
   extend HelperClasses::DPuts
 
-  def setup_modem(dev)
+  def setup_modem(dev = nil)
     @serial_tty = @serial_tty_error = @serial_sp = nil
     @serial_replies = []
     @serial_codes = {}
@@ -25,48 +25,20 @@ module SerialModem
     @serial_ussd_timeout = 30
     @serial_ussd_results = {}
     @serial_ussd_new = []
-    @serial_mutex = Mutex.new
-    check_presence and init_modem
-    @serial_thread = Thread.new {
-      #dputs_func
-      loop {
-        begin
-          dputs(5) { 'Reading out modem' }
-          if read_reply.length == 0
-            @serial_sms_to_delete.each { |id|
-              dputs(3) { "Deleting sms #{id} afterwards" }
-              sms_delete(id)
-            }
-            @serial_sms_to_delete = []
-          end
-
-          dputs(4) { (Time.now - @serial_ussd_last).to_s }
-          if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
-              (@serial_ussd.length > 0)
-            log_msg :SerialModem, "Re-sending #{@serial_ussd.first}"
-            ussd_send_now
-          end
-
-          sms_scan
-
-          sleep 0.5
-        rescue IOError
-          log_msg :SerialModem, 'IOError - killing modem'
-          return
-        rescue Exception => e
-          puts "#{e.inspect}"
-          puts "#{e.to_s}"
-          puts e.backtrace
-        end
-      }
-    }
+    @serial_mutex_rcv = Mutex.new
+    @serial_mutex_send = Mutex.new
+    # Some Huawei-modems eat SMS once they send a +CMTI-message - this
+    # turns off the CMTI-messages which slows down incoming SMS detection
+    @serial_eats_sms = false
+    setup_tty
   end
 
   def read_reply(wait = nil)
-    raise IOError.new('NoModemHere') unless check_tty
+    #dputs_func
+    raise IOError.new('NoModemHere') unless @serial_sp
     ret = []
     begin
-      @serial_mutex.synchronize {
+      @serial_mutex_rcv.synchronize {
         while !@serial_sp.eof? || wait
           begin
             @serial_replies.push rep = @serial_sp.readline.chomp
@@ -113,38 +85,39 @@ module SerialModem
               else
                 log_msg :serialmodem, "Unknown: CMTI - #{msg}"
               end
+              @serial_eats_sms and modem_send('AT+CNMI=0,0,0,0,0', 'OK')
             # Probably a message or so - '+CMTI: "ME",0' is a new message
           end
         end
       end
     rescue IOError => e
       raise e
+=begin
     rescue Exception => e
       puts "#{e.inspect}"
       puts "#{e.to_s}"
       puts e.backtrace
+=end
     end
     ret
   end
 
   def modem_send(str, reply = true)
-    return unless check_tty
+    return unless @serial_sp
+    #dputs_func
     dputs(3) { "Sending string #{str} to modem" }
-    check = false
-    @serial_mutex.synchronize {
+    @serial_mutex_send.synchronize {
       begin
         @serial_sp.write("#{str}\r\n")
       rescue Errno::EIO => e
         log_msg :SerialModem, "Couldn't write to device"
-        check = true
+        kill
       rescue Errno::ENODEV => e
         log_msg :SerialModem, 'Device is not here anymore'
-        check = true
+        kill
       end
     }
-    check and check_presence
     read_reply(reply)
-    #read_reply
   end
 
   def switch_to_hilink
@@ -256,6 +229,7 @@ module SerialModem
     (1..6).each {
       if @serial_codes.has_key? 'COPS'
         return '' if @serial_codes['COPS'] == '0'
+        @serial_eats_sms and modem_send('AT+CNMI=0,0,0,0,0', 'OK')
         return @serial_codes['COPS'].scan(/".*?"|[^",]\s*|,,/)[2].gsub(/"/, '')
       end
       sleep 0.5
@@ -280,68 +254,122 @@ module SerialModem
     AT+CPMS="SM","SM","SM"
     AT+CFUN=1
     AT+CMGF=1 ).each { |at| modem_send(at, 'OK') }
+    @serial_eats_sms and modem_send('AT+CNMI=0,0,0,0,0', 'OK')
     set_connection_type '3g'
   end
 
-  def check_tty
+  def setup_tty
     check_presence
 
-    if @serial_tty_error && File.exists?(@serial_tty_error)
-      log_msg :SerialModem, 'resetting modem'
-      %w( rmmod modprobe ).each { |cmd| System.run_bool("#{cmd} option") }
-      @serial_sp and @serial_sp.close
-      @serial_sp = nil
-    elsif !@serial_sp && @serial_tty
-      if File.exists? @serial_tty
-        log_msg :SerialModem, 'connecting modem'
-        @serial_sp = SerialPort.new(@serial_tty, 115200)
-        @serial_sp.read_timeout = 500
-        init_modem
+    @serial_mutex_rcv.synchronize {
+      if !@serial_sp && @serial_tty
+        if File.exists? @serial_tty
+          log_msg :SerialModem, 'setting up SerialPort'
+          @serial_sp = SerialPort.new(@serial_tty, 115200)
+          @serial_sp.read_timeout = 500
+        end
+      elsif @serial_sp &&
+          (!@serial_tty||(@serial_tty && !File.exists?(@serial_tty)))
+        log_msg :SerialModem, 'disconnecting modem'
+        kill
       end
-    elsif @serial_sp &&
-        (!@serial_tty||(@serial_tty && !File.exists?(@serial_tty)))
-      log_msg :SerialModem, 'disconnecting modem'
-      @serial_sp.close
-      @serial_sp = nil
-      @serial_ussd = nil
+    }
+    if @serial_sp
+      log_msg :SerialModem, 'initialising modem'
+      init_modem
+      start_serial_thread
+      log_msg :SerialModem, 'finished connecting'
     end
-
-    @serial_sp
   end
 
   def check_presence
-    @serial_mutex.synchronize {
-      @serial_tty and File.exists?(@serial_tty) and return
-      log_msg(:SerialModem, "serial_tty is #{@serial_tty} and exists " +
-          "#{File.exists?(@serial_tty.to_s)}")
+    @serial_mutex_rcv.synchronize {
+      @serial_tty.to_s.length > 0 and File.exists?(@serial_tty) and return
       case lsusb = System.run_str('lsusb')
         when /12d1:1506/, /12d1:14ac/, /12d1:1c05/
           log_msg :SerialModem, 'Found 3G-modem with ttyUSB0-ttyUSB2'
           @serial_tty_error = '/dev/ttyUSB3'
           @serial_tty = '/dev/ttyUSB2'
           @ussd_add = (lsusb =~ /12d1:14ac/) ? ',15' : ''
+          @serial_eats_sms = true
         when /airtel-modem/
           log_msg :SerialModem, 'Found 3G-modem with ttyUSB0-ttyUSB4'
           @serial_tty_error = '/dev/ttyUSB5'
           @serial_tty = '/dev/ttyUSB4'
           @ussd_add = ''
         else
+          #puts caller.join("\n")
           @serial_tty = @serial_tty_error = nil
+      end
+      log_msg(:SerialModem, "serial_tty is #{@serial_tty.inspect} and exists " +
+                              "#{File.exists?(@serial_tty.to_s)}")
+      if @serial_tty_error && File.exists?(@serial_tty_error)
+        log_msg :SerialModem, 'resetting modem'
+        reload_option
       end
     }
   end
 
+  def start_serial_thread
+    @serial_thread = Thread.new {
+      #dputs_func
+      log_msg :SerialModem, 'Thread started'
+      puts 'Thread started'
+      dputs(2) { 'Starting thread' }
+      loop {
+        begin
+          dputs(5) { 'Reading out modem' }
+          if read_reply.length == 0
+            @serial_sms_to_delete.each { |id|
+              dputs(3) { "Deleting sms #{id} afterwards" }
+              sms_delete(id)
+            }
+            @serial_sms_to_delete = []
+          end
+
+          dputs(4) { (Time.now - @serial_ussd_last).to_s }
+          if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
+              (@serial_ussd.length > 0)
+            log_msg :SerialModem, "Re-sending #{@serial_ussd.first}"
+            ussd_send_now
+          end
+
+          sms_scan
+
+          sleep 0.5
+        rescue IOError
+          log_msg :SerialModem, 'IOError - killing modem'
+          kill
+          return
+        end
+        dputs(5) { 'Finished' }
+      }
+      dputs(1) { 'Finished thread' }
+    }
+  end
+
+  def reload_option
+    @serial_sp and @serial_sp.close
+    @serial_sp = nil
+    dputs(1) { 'Trying to reload modem-driver - killing and reloading' }
+    %w( chat ppp).each { |pro| dputs(1) { System.run_str("killall -9 #{pro}") } }
+    %w(rmmod modprobe).each { |cmd| dputs(1) { System.run_str("#{cmd} option") } }
+  end
+
   def kill
+    #dputs_func
     if @serial_thread
       if @serial_thread.alive?
         dputs(3) { 'Killing thread' }
         @serial_thread.kill
         dputs(3) { 'Joining thread' }
         @serial_thread.join
+        dputs(3) { 'Thread joined' }
       end
     end
-    @serial_sp and @serial_sp = nil
-    dputs(3) { 'SerialModem killed' }
+    @serial_sp and @serial_sp.close
+    dputs(1) { 'SerialModem killed' }
+    @serial_sp = nil
   end
 
 end

@@ -5,12 +5,26 @@ DEBUG_LVL=5
 require 'serialmodem'
 include SerialModem
 
-setup_modem nil
-check_presence
+def main
+  test_remove
+end
+
+def test_remove
+  setup_modem
+  check_presence
+  sleep 3
+  kill
+  sleep 5
+  reload_option
+end
+
+def test_old
+  setup_modem nil
+  check_presence
 #set_connection_type '2go'
 #sleep 10
-ussd_send('*128#')
-sleep 5
+  ussd_send('*128#')
+  sleep 5
 #set_connection_type '3g'
 #sleep 10
 #ussd_send('*128#')
@@ -32,3 +46,6 @@ sleep 5
 #sleep 10
 #puts SerialModem::send_modem('atz')
 #sleep 10
+end
+
+main
