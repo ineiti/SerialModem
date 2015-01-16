@@ -314,8 +314,6 @@ module SerialModem
     @serial_thread = Thread.new {
       #dputs_func
       log_msg :SerialModem, 'Thread started'
-      puts 'Thread started'
-      dputs(2) { 'Starting thread' }
       loop {
         begin
           dputs(5) { 'Reading out modem' }
