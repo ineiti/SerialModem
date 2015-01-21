@@ -12,6 +12,7 @@ module SerialModem
   extend HelperClasses::DPuts
 
   def setup_modem(dev = nil)
+    @serial_debug = false
     @serial_tty = @serial_tty_error = @serial_sp = nil
     @serial_replies = []
     @serial_codes = {}
@@ -34,7 +35,7 @@ module SerialModem
   end
 
   def read_reply(wait = nil)
-    #dputs_func
+    @serial_debug and dputs_func
     raise IOError.new('NoModemHere') unless @serial_sp
     ret = []
     begin
@@ -104,7 +105,7 @@ module SerialModem
 
   def modem_send(str, reply = true)
     return unless @serial_sp
-    #dputs_func
+    @serial_debug and dputs_func
     dputs(3) { "Sending string #{str} to modem" }
     @serial_mutex_send.synchronize {
       begin
@@ -230,7 +231,9 @@ module SerialModem
       if @serial_codes.has_key? 'COPS'
         return '' if @serial_codes['COPS'] == '0'
         @serial_eats_sms and modem_send('AT+CNMI=0,0,0,0,0', 'OK')
-        return @serial_codes['COPS'].scan(/".*?"|[^",]\s*|,,/)[2].gsub(/"/, '')
+        op = @serial_codes['COPS'].scan(/".*?"|[^",]\s*|,,/)[2].gsub(/"/, '')
+        dputs(2){"Found operator-string #{op}"}
+        return op
       end
       sleep 0.5
     }
