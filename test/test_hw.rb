@@ -6,7 +6,7 @@ require 'serialmodem'
 include SerialModem
 
 def main
-  test_remove
+  test_send_ussd
 end
 
 def test_remove
@@ -16,6 +16,14 @@ def test_remove
   kill
   sleep 5
   reload_option
+end
+
+def test_send_ussd
+  setup_modem
+  #check_presence
+  ussd_send('*100#')
+  sleep 5
+  dp 'done'
 end
 
 def test_old
