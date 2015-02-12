@@ -24,7 +24,7 @@ module SerialModem
     @serial_ussd = []
     @serial_ussd_last = Time.now
     @serial_ussd_timeout = 30
-    @serial_ussd_results = {}
+    @serial_ussd_results = []
     @serial_ussd_new = []
     @serial_mutex_rcv = Mutex.new
     @serial_mutex_send = Mutex.new
@@ -176,7 +176,7 @@ module SerialModem
     if @serial_ussd.length > 0
       code = @serial_ussd.shift
       dputs(2) { "Got USSD-reply for #{code}: #{str}" }
-      @serial_ussd_results[code] = str
+      @serial_ussd_results.push(time: Time.now.to_s, code: code, result: str)
       ussd_send_now
       code
     else
@@ -196,7 +196,8 @@ module SerialModem
   def ussd_fetch(str)
     return nil unless @serial_ussd_results
     dputs(3) { "Fetching str #{str} - #{@serial_ussd_results.inspect}" }
-    @serial_ussd_results.has_key?(str) ? @serial_ussd_results[str] : nil
+    res = @serial_ussd_results.reverse.find{|u| u._code == str}
+    res ? res._result : nil
   end
 
   def sms_send(number, msg)
