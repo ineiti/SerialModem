@@ -25,6 +25,7 @@ module SerialModem
     @serial_ussd_last = Time.now
     @serial_ussd_timeout = 30
     @serial_ussd_results = []
+    @serial_ussd_results_max = 100
     @serial_ussd_new = []
     @serial_mutex_rcv = Mutex.new
     @serial_mutex_send = Mutex.new
@@ -176,7 +177,10 @@ module SerialModem
     if @serial_ussd.length > 0
       code = @serial_ussd.shift
       dputs(2) { "Got USSD-reply for #{code}: #{str}" }
-      @serial_ussd_results.push(time: Time.now.to_s, code: code, result: str)
+      @serial_ussd_results.push(time: Time.now.strftime('%H:%M'),
+                                code: code, result: str)
+      @serial_ussd_results.shift([0,@serial_ussd_results.length -
+                                 @serial_ussd_results_max].max)
       ussd_send_now
       code
     else
@@ -196,7 +200,7 @@ module SerialModem
   def ussd_fetch(str)
     return nil unless @serial_ussd_results
     dputs(3) { "Fetching str #{str} - #{@serial_ussd_results.inspect}" }
-    res = @serial_ussd_results.reverse.find{|u| u._code == str}
+    res = @serial_ussd_results.reverse.find { |u| u._code == str }
     res ? res._result : nil
   end
 
@@ -233,7 +237,7 @@ module SerialModem
         return '' if @serial_codes['COPS'] == '0'
         @serial_eats_sms and modem_send('AT+CNMI=0,0,0,0,0', 'OK')
         op = @serial_codes['COPS'].scan(/".*?"|[^",]\s*|,,/)[2].gsub(/"/, '')
-        dputs(2){"Found operator-string #{op}"}
+        dputs(2) { "Found operator-string #{op}" }
         return op
       end
       sleep 0.5
