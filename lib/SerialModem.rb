@@ -114,9 +114,11 @@ module SerialModem
       rescue Errno::EIO => e
         log_msg :SerialModem, "Couldn't write to device"
         kill
+        return
       rescue Errno::ENODEV => e
         log_msg :SerialModem, 'Device is not here anymore'
         kill
+        return
       end
     }
     read_reply(reply)
@@ -179,8 +181,8 @@ module SerialModem
       dputs(2) { "Got USSD-reply for #{code}: #{str}" }
       @serial_ussd_results.push(time: Time.now.strftime('%H:%M'),
                                 code: code, result: str)
-      @serial_ussd_results.shift([0,@serial_ussd_results.length -
-                                 @serial_ussd_results_max].max)
+      @serial_ussd_results.shift([0, @serial_ussd_results.length -
+                                       @serial_ussd_results_max].max)
       ussd_send_now
       code
     else
@@ -286,6 +288,13 @@ module SerialModem
       log_msg :SerialModem, 'initialising modem'
       init_modem
       start_serial_thread
+      if !@serial_sp
+        log_msg :SerialModem, 'Lost serial-connection while initialising - trying again'
+        kill
+        reload_option
+        setup_tty
+        return
+      end
       log_msg :SerialModem, 'finished connecting'
     end
   end
@@ -358,8 +367,12 @@ module SerialModem
     @serial_sp and @serial_sp.close
     @serial_sp = nil
     dputs(1) { 'Trying to reload modem-driver - killing and reloading' }
-    %w( chat ppp).each { |pro| dputs(1) { System.run_str("killall -9 #{pro}") } }
-    %w(rmmod modprobe).each { |cmd| dputs(1) { System.run_str("#{cmd} option") } }
+    %w( chat ppp).each { |pro|
+      System.run_str("killall -9 #{pro}")
+    }
+    %w(rmmod modprobe).each { |cmd|
+      System.run_str("#{cmd} option")
+    }
   end
 
   def kill
