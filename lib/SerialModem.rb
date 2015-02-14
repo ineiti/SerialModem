@@ -53,6 +53,7 @@ module SerialModem
       }
 
       while m = @serial_replies.shift
+        @serial_debug and dputs_func
         next if (m == '' || m =~ /^\^/)
         dputs(3) { "Reply: #{m}" }
         ret.push m
@@ -75,7 +76,7 @@ module SerialModem
                 ussd_received(pdu_to_ussd(pdu[1]))
               elsif msg == '2'
                 log_msg :serialmodem, 'Closed USSD.'
-                ussd_received('')
+                #ussd_received('')
                 #ussd_close
               else
                 log_msg :serialmodem, "Unknown: CUSD - #{msg}"
