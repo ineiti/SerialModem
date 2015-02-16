@@ -148,8 +148,8 @@ module SerialModem
     str_send = @serial_ussd.first
     @serial_ussd_last = Time.now
     if str_send
-      dputs(2) { "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
-          "and queue #{@serial_ussd}" }
+      log_msg :SerialModem, "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
+          "and queue #{@serial_ussd}"
       modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
     else
       dputs(2) { 'Sending ussd-close' }
@@ -165,11 +165,11 @@ module SerialModem
 
   def ussd_send(str)
     if str.class == String
-      dputs(2) { "Sending ussd-code #{str}" }
+      dputs(3) { "Sending ussd-code #{str}" }
       @serial_ussd.push str
       @serial_ussd.length == 1 and ussd_send_now
     elsif str.class == Array
-      dputs(2) { "Sending menu-command #{str}" }
+      dputs(3) { "Sending menu-command #{str}" }
       @serial_ussd.concat str
       @serial_ussd.push nil
       @serial_ussd.length == str.length + 1 and ussd_send_now
