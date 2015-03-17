@@ -1,4 +1,4 @@
-require 'SerialModem/version'
+require 'serialmodem/version'
 require 'serialport'
 require 'helperclasses'
 
