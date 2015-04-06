@@ -392,4 +392,8 @@ module SerialModem
     @serial_sp = nil
   end
 
+  def attached?
+    @serial_sp != nil
+  end
+
 end
