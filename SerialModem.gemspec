@@ -5,7 +5,7 @@ require 'serialmodem/version'
 
 Gem::Specification.new do |spec|
   spec.name          = 'SerialModem'
-  spec.version       = SerialModem::VERSION
+  spec.version       = '0.2.1'
   spec.authors       = ['Linus Gasser']
   spec.email         = ['ineiti@linusetviviane.ch']
   spec.summary       = %q{Interface to serial-usb-modems}
