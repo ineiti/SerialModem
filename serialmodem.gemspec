@@ -8,7 +8,7 @@ Gem::Specification.new do |spec|
   spec.authors       = ['Linus Gasser']
   spec.email         = ['ineiti@linusetviviane.ch']
   spec.summary       = %q{Interface to serial-usb-modems}
-  spec.description   = %q{This can interface a lot of different usb-modems}
+  spec.description   = %q{This can interface a lot of different usb-modems and serial modems}
   spec.homepage      = 'https://github.com/ineiti/SerialModem'
   spec.license       = 'GPLv3'
 
