@@ -16,6 +16,7 @@ module SerialModem
     @serial_replies = []
     @serial_codes = {}
     @serial_sms = {}
+    # TODO: once serialmodem == class, change this into Observer
     @serial_sms_new = []
     @serial_sms_to_delete = []
     @serial_sms_autoscan = 20
@@ -25,6 +26,7 @@ module SerialModem
     @serial_ussd_timeout = 30
     @serial_ussd_results = []
     @serial_ussd_results_max = 100
+    # TODO: once serialmodem == class, change this into Observer
     @serial_ussd_new = []
     @serial_mutex_rcv = Mutex.new
     @serial_mutex_send = Mutex.new
@@ -62,14 +64,14 @@ module SerialModem
           @serial_codes[code] = msg
           case code
             when /CMGL/
-              sms_id, sms_flag, sms_number, sms_unknown, sms_date =
-                  msg.scan(/(".*?"|[^",]+\s*|,,)/).flatten
+              # Typical input from the modem:
+              # "0,\"REC UNREAD\",\"+23599836457\",,\"15/04/08,17:12:21+04\""
+              # Output desired:
+              # ["0", "REC UNREAD", "+23599836457", "", "15/04/08,17:12:21+04"]
+              id, flag, number, unknown, date =
+                  msg.scan(/"(.*?)"|([^",]+)\s*|,,/).collect { |a, b| a.to_s + b.to_s }
               ret.push @serial_replies.shift
-              @serial_sms[sms_id] = [sms_flag, sms_number, sms_unknown, sms_date,
-                                     ret.last]
-              @serial_sms_new.each { |s|
-                s.call(@serial_sms, sms_id)
-              }
+              sms_new(id, flag, number, date, ret.last, unknown)
             when /CUSD/
               if pdu = msg.match(/.*\"(.*)\".*/)
                 ussd_received(pdu_to_ussd(pdu[1]))
@@ -102,6 +104,19 @@ module SerialModem
 =end
     end
     ret
+  end
+
+  def sms_new(id, flag, number, date, msg, unknown = nil)
+    sms = {flag: flag, number: number, unknown: unknown, date: date,
+           msg: ret.last, id: id}
+    @serial_sms[id] = sms
+    log_msg :SerialModem, "New SMS: #{sms.inspect}"
+    if flag =~ /unread/i
+      @serial_sms_new.each { |s|
+        s.call(sms)
+      }
+    end
+    sms
   end
 
   def modem_send(str, reply = true)
@@ -148,7 +163,7 @@ module SerialModem
     @serial_ussd_last = Time.now
     if str_send
       log_msg :SerialModem, "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
-          "and queue #{@serial_ussd}"
+                              "and queue #{@serial_ussd}"
       modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
     else
       dputs(2) { 'Sending ussd-close' }
@@ -207,6 +222,7 @@ module SerialModem
   end
 
   def sms_send(number, msg)
+    log_msg :SerialModem, "Sending --#{msg.inspect}-- to --#{number.inspect}--"
     modem_send('AT+CMGF=1', 'OK')
     modem_send("AT+CMGS=\"#{number}\"")
     modem_send("#{msg}\x1a", 'OK')
@@ -224,10 +240,10 @@ module SerialModem
 
   def sms_delete(number)
     dputs(3) { "Asking to delete #{number} from #{@serial_sms.inspect}" }
-    if @serial_sms.has_key? number
-      dputs(3) { "Deleting #{number}" }
+    if @serial_sms.has_key? number.to_s
+      ddputs(3) { "Deleting #{number}" }
       modem_send("AT+CMGD=#{number}", 'OK')
-      @serial_sms.delete number
+      @serial_sms.delete number.to_s
     end
   end
 
