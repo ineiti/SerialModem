@@ -23,7 +23,7 @@ def test_send_ussd
   #check_presence
   ussd_send('*100#')
   sleep 5
-  dp 'done'
+  #dp 'done'
 end
 
 def test_old
