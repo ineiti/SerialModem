@@ -3,7 +3,7 @@ require 'helperclasses'
 
 module SerialModem
   DEBUG_LVL = 1
-  attr_accessor :serial_sms_new, :serial_sms_to_delete, :serial_sms,
+  attr_accessor :serial_sms_new, :serial_sms,
                 :serial_ussd_new
   extend self
   include HelperClasses
@@ -18,7 +18,6 @@ module SerialModem
     @serial_sms = {}
     # TODO: once serialmodem == class, change this into Observer
     @serial_sms_new = []
-    @serial_sms_to_delete = []
     @serial_sms_autoscan = 20
     @serial_sms_autoscan_last = Time.now
     @serial_ussd = []
@@ -60,7 +59,7 @@ module SerialModem
         ret.push m
         if m =~ /\+[\w]{4}: /
           code, msg = m[1..4], m[7..-1]
-          dputs(2) { "found code #{code.inspect} - #{msg.inspect}" }
+          dputs(3) { "found code #{code.inspect} - #{msg.inspect}" }
           @serial_codes[code] = msg
           case code
             when /CMGL/
@@ -76,7 +75,7 @@ module SerialModem
               if pdu = msg.match(/.*\"(.*)\".*/)
                 ussd_received(pdu_to_ussd(pdu[1]))
               elsif msg == '2'
-                log_msg :serialmodem, 'Closed USSD.'
+                #log_msg :serialmodem, 'Closed USSD.'
                 #ussd_received('')
                 #ussd_close
               else
@@ -84,7 +83,7 @@ module SerialModem
               end
             when /CMTI/
               if msg =~ /^.ME.,/
-                dputs(2) { "I think I got a new message: #{msg}" }
+                dputs(3) { "I think I got a new message: #{msg}" }
                 sms_scan true
               else
                 log_msg :serialmodem, "Unknown: CMTI - #{msg}"
@@ -108,13 +107,15 @@ module SerialModem
 
   def sms_new(id, flag, number, date, msg, unknown = nil)
     sms = {flag: flag, number: number, unknown: unknown, date: date,
-           msg: ret.last, id: id}
-    @serial_sms[id] = sms
-    log_msg :SerialModem, "New SMS: #{sms.inspect}"
+           msg: msg, id: id}
+    @serial_sms[id.to_s] = sms
     if flag =~ /unread/i
-      @serial_sms_new.each { |s|
-        s.call(sms)
-      }
+      log_msg :SerialModem, "New SMS: #{sms.inspect}"
+      rescue_all do
+        @serial_sms_new.each { |s|
+          s.call(sms)
+        }
+      end
     end
     sms
   end
@@ -162,7 +163,7 @@ module SerialModem
     str_send = @serial_ussd.first
     @serial_ussd_last = Time.now
     if str_send
-      log_msg :SerialModem, "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
+      #log_msg :SerialModem, "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
                               "and queue #{@serial_ussd}"
       modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
     else
@@ -201,7 +202,7 @@ module SerialModem
       ussd_send_now
       code
     else
-      log_msg :serialmodem, "Got unasked code #{str}"
+      #log_msg :serialmodem, "Got unasked code #{str}"
       'unknown'
     end
   end
@@ -222,7 +223,7 @@ module SerialModem
   end
 
   def sms_send(number, msg)
-    log_msg :SerialModem, "Sending --#{msg.inspect}-- to --#{number.inspect}--"
+    log_msg :SerialModem, "Sending SMS --#{msg.inspect}-- to --#{number.inspect}--"
     modem_send('AT+CMGF=1', 'OK')
     modem_send("AT+CMGS=\"#{number}\"")
     modem_send("#{msg}\x1a", 'OK')
@@ -241,7 +242,7 @@ module SerialModem
   def sms_delete(number)
     dputs(3) { "Asking to delete #{number} from #{@serial_sms.inspect}" }
     if @serial_sms.has_key? number.to_s
-      ddputs(3) { "Deleting #{number}" }
+      dputs(3) { "Deleting #{number}" }
       modem_send("AT+CMGD=#{number}", 'OK')
       @serial_sms.delete number.to_s
     end
@@ -290,28 +291,28 @@ module SerialModem
     @serial_mutex_rcv.synchronize {
       if !@serial_sp && @serial_tty
         if File.exists? @serial_tty
-          log_msg :SerialModem, 'setting up SerialPort'
+          dputs(2){ 'setting up SerialPort'}
           @serial_sp = SerialPort.new(@serial_tty, 115200)
           @serial_sp.read_timeout = 500
         end
       elsif @serial_sp &&
           (!@serial_tty||(@serial_tty && !File.exists?(@serial_tty)))
-        log_msg :SerialModem, 'disconnecting modem'
+        dputs(2){'disconnecting modem'}
         kill
       end
     }
     if @serial_sp
-      log_msg :SerialModem, 'initialising modem'
+      dputs(2){'initialising modem'}
       init_modem
       start_serial_thread
       if !@serial_sp
-        log_msg :SerialModem, 'Lost serial-connection while initialising - trying again'
+        dputs(2){'Lost serial-connection while initialising - trying again'}
         kill
         reload_option
         setup_tty
         return
       end
-      log_msg :SerialModem, 'finished connecting'
+      dputs(2){'finished connecting'}
     end
   end
 
@@ -334,8 +335,8 @@ module SerialModem
           #puts caller.join("\n")
           @serial_tty = @serial_tty_error = nil
       end
-      log_msg(:SerialModem, "serial_tty is #{@serial_tty.inspect} and exists " +
-                              "#{File.exists?(@serial_tty.to_s)}")
+      dputs(2){"serial_tty is #{@serial_tty.inspect} and exists " +
+                              "#{File.exists?(@serial_tty.to_s)}"}
       if @serial_tty_error && File.exists?(@serial_tty_error)
         log_msg :SerialModem, 'resetting modem'
         reload_option
@@ -346,16 +347,15 @@ module SerialModem
   def start_serial_thread
     @serial_thread = Thread.new {
       #dputs_func
-      log_msg :SerialModem, 'Thread started'
+      dputs(2){'Thread started'}
       loop {
         begin
           dputs(5) { 'Reading out modem' }
           if read_reply.length == 0
-            @serial_sms_to_delete.each { |id|
-              dputs(3) { "Deleting sms #{id} afterwards" }
-              sms_delete(id)
-            }
-            @serial_sms_to_delete = []
+            #@serial_sms.each { |id, sms|
+            #  ddputs(3) { "Deleting sms #{sms.inspect} afterwards" }
+            #  sms_delete(id)
+            #}
           end
 
           dputs(4) { (Time.now - @serial_ussd_last).to_s }
@@ -372,6 +372,10 @@ module SerialModem
           log_msg :SerialModem, 'IOError - killing modem'
           kill
           return
+        rescue Exception => e
+          dputs(0) { "#{e.inspect}" }
+          dputs(0) { "#{e.to_s}" }
+          e.backtrace.each { |l| dputs(0) { l } }
         end
         dputs(5) { 'Finished' }
       }
