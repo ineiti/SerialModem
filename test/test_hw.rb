@@ -2,7 +2,7 @@
 #$LOAD_PATH.push '../lib'
 DEBUG_LVL=5
 
-require 'serialmodem'
+require 'serial_modem'
 include SerialModem
 
 def main
