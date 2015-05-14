@@ -1,5 +1,5 @@
 require 'serialport'
-require 'helperclasses'
+require 'helper_classes'
 
 module SerialModem
   DEBUG_LVL = 1
