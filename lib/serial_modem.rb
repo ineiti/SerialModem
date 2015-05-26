@@ -31,30 +31,29 @@ module SerialModem
     # TODO: once serialmodem == class, change this into Observer
     @serial_ussd_new = []
     @serial_ussd_new_list = []
-    @serial_mutex_rcv = Mutex.new
-    @serial_mutex_send = Mutex.new
+    @serial_mutex = Mutex.new
     # Some Huawei-modems eat SMS once they send a +CMTI-message - this
     # turns off the CMTI-messages which slows down incoming SMS detection
     @serial_eats_sms = false
     setup_tty
   end
 
-  def read_reply(wait = nil)
+  def read_reply(wait = nil, sync: true)
     @serial_debug and dputs_func
     raise IOError.new('NoModemHere') unless @serial_sp
     ret = []
     begin
-      @serial_mutex_rcv.synchronize {
-        while !@serial_sp.eof? || wait
-          begin
-            @serial_replies.push rep = @serial_sp.readline.chomp
-            break if rep == wait
-          rescue EOFError => e
-            dputs(4) { 'Waited for string, but got nothing' }
-            break
-          end
+      sync and @serial_mutex.lock
+      while !@serial_sp.eof? || wait
+        begin
+          @serial_replies.push rep = @serial_sp.readline.chomp
+          break if rep == wait
+        rescue EOFError => e
+          dputs(4) { 'Waited for string, but got nothing' }
+          break
         end
-      }
+      end
+      sync and @serial_mutex.unlock
 
       while m = @serial_replies.shift
         @serial_debug and dputs_func
@@ -119,29 +118,31 @@ module SerialModem
     sms
   end
 
-  def modem_send(str, reply = true)
+  def modem_send(str, reply = true, lock: true)
     return unless @serial_sp
     @serial_debug and dputs_func
     dputs(3) { "Sending string #{str} to modem" }
-    @serial_mutex_send.synchronize {
-      begin
-        @serial_sp.write("#{str}\r\n")
-      rescue Errno::EIO => e
-        log_msg :SerialModem, "Couldn't write to device"
-        kill
-        return
-      rescue Errno::ENODEV => e
-        log_msg :SerialModem, 'Device is not here anymore'
-        kill
-        return
-      end
-      read_reply(reply)
-    }
+    lock and @serial_mutex.lock
+    begin
+      @serial_sp.write("#{str}\r\n")
+    rescue Errno::EIO => e
+      log_msg :SerialModem, "Couldn't write to device"
+      kill
+      return
+    rescue Errno::ENODEV => e
+      log_msg :SerialModem, 'Device is not here anymore'
+      kill
+      return
+    end
+    read_reply(reply, lock: false)
+    lock and @serial_mutex.unlock
   end
 
   def modem_send_array(cmds)
-    cmds.each { |str, reply=true|
-      modem_send(str, reply)
+    @serial_mutex.synchronize{
+      cmds.each { |str, reply=true|
+        modem_send(str, reply, lock: false)
+      }
     }
   end
 
@@ -295,7 +296,7 @@ module SerialModem
   def setup_tty
     check_presence
 
-    @serial_mutex_rcv.synchronize {
+    @serial_mutex.synchronize {
       if !@serial_sp && @serial_tty
         if File.exists? @serial_tty
           dputs(2) { 'setting up SerialPort' }
@@ -324,7 +325,7 @@ module SerialModem
   end
 
   def check_presence
-    @serial_mutex_rcv.synchronize {
+    @serial_mutex.synchronize {
       @serial_tty.to_s.length > 0 and File.exists?(@serial_tty) and return
       case lsusb = System.run_str('lsusb')
         when /12d1:1506/, /12d1:14ac/, /12d1:1c05/
@@ -412,7 +413,7 @@ module SerialModem
     @serial_sp and @serial_sp.close
     @serial_sp = nil
     dputs(1) { 'Trying to reload modem-driver - killing and reloading' }
-    %w( chat ppp).each { |pro|
+    %w(chat ppp).each { |pro|
       System.run_str("killall -9 #{pro}")
     }
     %w(rmmod modprobe).each { |cmd|
