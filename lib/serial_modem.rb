@@ -18,6 +18,7 @@ module SerialModem
     @serial_sms = {}
     # TODO: once serialmodem == class, change this into Observer
     @serial_sms_new = []
+    @serial_sms_new_list = []
     @serial_sms_autoscan = 20
     @serial_sms_autoscan_last = Time.now
     @serial_ussd = []
@@ -25,8 +26,11 @@ module SerialModem
     @serial_ussd_timeout = 30
     @serial_ussd_results = []
     @serial_ussd_results_max = 100
+    @serial_ussd_sent = 0
+    @serial_ussd_sent_max = 3
     # TODO: once serialmodem == class, change this into Observer
     @serial_ussd_new = []
+    @serial_ussd_new_list = []
     @serial_mutex_rcv = Mutex.new
     @serial_mutex_send = Mutex.new
     # Some Huawei-modems eat SMS once they send a +CMTI-message - this
@@ -84,11 +88,10 @@ module SerialModem
             when /CMTI/
               if msg =~ /^.ME.,/
                 dputs(3) { "I think I got a new message: #{msg}" }
-                sms_scan true
+                @serial_sms_autoscan_last = Time.now - @serial_sms_autoscan
               else
                 log_msg :serialmodem, "Unknown: CMTI - #{msg}"
               end
-              @serial_eats_sms and modem_send('AT+CNMI=0,0,0,0,0', 'OK')
             # Probably a message or so - '+CMTI: "ME",0' is a new message
           end
         end
@@ -111,11 +114,7 @@ module SerialModem
     @serial_sms[id.to_s] = sms
     if flag =~ /unread/i
       log_msg :SerialModem, "New SMS: #{sms.inspect}"
-      rescue_all do
-        @serial_sms_new.each { |s|
-          s.call(sms)
-        }
-      end
+      @serial_sms_new_list.push(sms)
     end
     sms
   end
@@ -136,8 +135,14 @@ module SerialModem
         kill
         return
       end
+      read_reply(reply)
     }
-    read_reply(reply)
+  end
+
+  def modem_send_array(cmds)
+    cmds.each { |str, reply=true|
+      modem_send(str, reply)
+    }
   end
 
   def switch_to_hilink
@@ -155,7 +160,7 @@ module SerialModem
 
   def pdu_to_ussd(str)
     [str].pack('H*').unpack('b*').join.scan(/.{7}/).
-        map { |s| [s+"0"].pack('b*') }.join
+        map { |s| [s+'0'].pack('b*') }.join
   end
 
   def ussd_send_now
@@ -164,7 +169,7 @@ module SerialModem
     @serial_ussd_last = Time.now
     if str_send
       #log_msg :SerialModem, "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
-                              "and queue #{@serial_ussd}"
+      "and queue #{@serial_ussd}"
       modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
     else
       dputs(2) { 'Sending ussd-close' }
@@ -189,6 +194,7 @@ module SerialModem
       @serial_ussd.push nil
       @serial_ussd.length == str.length + 1 and ussd_send_now
     end
+    @serial_ussd_sent = 0
   end
 
   def ussd_store_result(str)
@@ -200,6 +206,7 @@ module SerialModem
       @serial_ussd_results.shift([0, @serial_ussd_results.length -
                                        @serial_ussd_results_max].max)
       ussd_send_now
+      @serial_ussd_sent = 0
       code
     else
       #log_msg :serialmodem, "Got unasked code #{str}"
@@ -210,9 +217,7 @@ module SerialModem
   def ussd_received(str)
     code = ussd_store_result(str)
     dputs(2) { "Got result for #{code}: -#{str}-" }
-    @serial_ussd_new.each { |s|
-      s.call(code, str)
-    }
+    @serial_ussd_new_list.push([code, str])
   end
 
   def ussd_fetch(str)
@@ -224,9 +229,9 @@ module SerialModem
 
   def sms_send(number, msg)
     log_msg :SerialModem, "Sending SMS --#{msg.inspect}-- to --#{number.inspect}--"
-    modem_send('AT+CMGF=1', 'OK')
-    modem_send("AT+CMGS=\"#{number}\"")
-    modem_send("#{msg}\x1a", 'OK')
+    modem_send_array([['AT+CMGF=1', 'OK'],
+                      ["AT+CMGS=\"#{number}\""],
+                      ["#{msg}\x1a", 'OK']])
   end
 
   def sms_scan(force = false)
@@ -234,8 +239,10 @@ module SerialModem
         Time.now - @serial_sms_autoscan_last > @serial_sms_autoscan)
       dputs(3) { 'Auto-scanning sms' }
       @serial_sms_autoscan_last = Time.now
-      modem_send('AT+CMGF=1', 'OK')
-      modem_send('AT+CMGL="ALL"', 'OK')
+      req = [['AT+CMGF=1', 'OK'],
+             ['AT+CMGL="ALL"', 'OK']]
+      @serial_eats_sms and req.push(['AT+CNMI=0,0,0,0,0', 'OK'])
+      modem_send_array(req)
     end
   end
 
@@ -249,8 +256,8 @@ module SerialModem
   end
 
   def get_operator
-    modem_send('AT+COPS=3,0', 'OK')
-    modem_send('AT+COPS?', 'OK')
+    modem_send_array([['AT+COPS=3,0', 'OK'],
+                      ['AT+COPS?', 'OK']])
     (1..6).each {
       if @serial_codes.has_key? 'COPS'
         return '' if @serial_codes['COPS'] == '0'
@@ -291,28 +298,28 @@ module SerialModem
     @serial_mutex_rcv.synchronize {
       if !@serial_sp && @serial_tty
         if File.exists? @serial_tty
-          dputs(2){ 'setting up SerialPort'}
+          dputs(2) { 'setting up SerialPort' }
           @serial_sp = SerialPort.new(@serial_tty, 115200)
           @serial_sp.read_timeout = 500
         end
       elsif @serial_sp &&
           (!@serial_tty||(@serial_tty && !File.exists?(@serial_tty)))
-        dputs(2){'disconnecting modem'}
+        dputs(2) { 'disconnecting modem' }
         kill
       end
     }
     if @serial_sp
-      dputs(2){'initialising modem'}
+      dputs(2) { 'initialising modem' }
       init_modem
       start_serial_thread
       if !@serial_sp
-        dputs(2){'Lost serial-connection while initialising - trying again'}
+        dputs(2) { 'Lost serial-connection while initialising - trying again' }
         kill
         reload_option
         setup_tty
         return
       end
-      dputs(2){'finished connecting'}
+      dputs(2) { 'finished connecting' }
     end
   end
 
@@ -335,8 +342,8 @@ module SerialModem
           #puts caller.join("\n")
           @serial_tty = @serial_tty_error = nil
       end
-      dputs(2){"serial_tty is #{@serial_tty.inspect} and exists " +
-                              "#{File.exists?(@serial_tty.to_s)}"}
+      dputs(2) { "serial_tty is #{@serial_tty.inspect} and exists " +
+          "#{File.exists?(@serial_tty.to_s)}" }
       if @serial_tty_error && File.exists?(@serial_tty_error)
         log_msg :SerialModem, 'resetting modem'
         reload_option
@@ -347,7 +354,7 @@ module SerialModem
   def start_serial_thread
     @serial_thread = Thread.new {
       #dputs_func
-      dputs(2){'Thread started'}
+      dputs(2) { 'Thread started' }
       loop {
         begin
           dputs(5) { 'Reading out modem' }
@@ -361,11 +368,29 @@ module SerialModem
           dputs(4) { (Time.now - @serial_ussd_last).to_s }
           if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
               (@serial_ussd.length > 0)
-            log_msg :SerialModem, "Re-sending #{@serial_ussd.first}"
-            ussd_send_now
+            if (@serial_ussd_sent += 1) >= @serial_ussd_sent_max
+              log_msg :SerialModem, "Re-sending #{@serial_ussd.first} for #{@serial_ussd_sent}"
+              ussd_send_now
+            end
           end
 
           sms_scan
+
+          # Check for any new sms and call attached methods
+          @serial_sms_new_list.each { |sms|
+            rescue_all do
+              @serial_sms_new.each { |s|
+                s.call(sms)
+              }
+            end
+          }
+
+          # Check for any new ussds and call attached methods
+          @serial_ussd_new_list.each { |code, str|
+            @serial_ussd_new.each { |s|
+              s.call(code, str)
+            }
+          }
 
           sleep 0.5
         rescue IOError
