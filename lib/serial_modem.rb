@@ -38,12 +38,12 @@ module SerialModem
     setup_tty
   end
 
-  def read_reply(wait = nil, sync: true)
+  def read_reply(wait = nil, lock: true)
     @serial_debug and dputs_func
     raise IOError.new('NoModemHere') unless @serial_sp
     ret = []
     begin
-      sync and @serial_mutex.lock
+      lock and @serial_mutex.lock
       while !@serial_sp.eof? || wait
         begin
           @serial_replies.push rep = @serial_sp.readline.chomp
@@ -53,7 +53,7 @@ module SerialModem
           break
         end
       end
-      sync and @serial_mutex.unlock
+      lock and @serial_mutex.unlock
 
       while m = @serial_replies.shift
         @serial_debug and dputs_func
