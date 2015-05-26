@@ -385,6 +385,7 @@ module SerialModem
               }
             end
           }
+          @serial_sms_new_list = []
 
           # Check for any new ussds and call attached methods
           @serial_ussd_new_list.each { |code, str|
@@ -392,6 +393,7 @@ module SerialModem
               s.call(code, str)
             }
           }
+          @serial_ussd_new_list = []
 
           sleep 0.5
         rescue IOError
