@@ -111,10 +111,8 @@ module SerialModem
     sms = {flag: flag, number: number, unknown: unknown, date: date,
            msg: msg, id: id}
     @serial_sms[id.to_s] = sms
-    if flag =~ /unread/i
-      log_msg :SerialModem, "New SMS: #{sms.inspect}"
-      @serial_sms_new_list.push(sms)
-    end
+    log_msg :SerialModem, "New SMS: #{sms.inspect}"
+    @serial_sms_new_list.push(sms)
     sms
   end
 
@@ -139,7 +137,7 @@ module SerialModem
   end
 
   def modem_send_array(cmds)
-    @serial_mutex.synchronize{
+    @serial_mutex.synchronize {
       cmds.each { |str, reply=true|
         modem_send(str, reply, lock: false)
       }
@@ -378,22 +376,26 @@ module SerialModem
           sms_scan
 
           # Check for any new sms and call attached methods
-          @serial_sms_new_list.each { |sms|
+          while (sms = @serial_sms_new_list.shift) do
             rescue_all do
-              @serial_sms_new.each { |s|
-                s.call(sms)
-              }
+              if sms._flag =~ /unread/i
+                @serial_sms_new.each { |s|
+                  s.call(sms)
+                }
+              else
+                dputs(2) { "Already read sms: #{sms}" }
+              end
+              sms_delete(sms._id)
             end
-          }
-          @serial_sms_new_list = []
+          end
 
           # Check for any new ussds and call attached methods
-          @serial_ussd_new_list.each { |code, str|
+          while (ussd = @serial_ussd_new_list.shift) do
+            code, str = ussd
             @serial_ussd_new.each { |s|
               s.call(code, str)
             }
-          }
-          @serial_ussd_new_list = []
+          end
 
           sleep 0.5
         rescue IOError
