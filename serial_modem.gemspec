@@ -4,7 +4,7 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 
 Gem::Specification.new do |spec|
   spec.name          = 'serial_modem'
-  spec.version       = '0.3.1'
+  spec.version       = '0.3.2'
   spec.authors       = ['Linus Gasser']
   spec.email         = ['ineiti@linusetviviane.ch']
   spec.summary       = %q{Interface to serial-usb-modems}
@@ -17,7 +17,7 @@ Gem::Specification.new do |spec|
   spec.test_files    = spec.files.grep(%r{^(test|spec|features)/})
   spec.require_paths = ['lib']
 
-  spec.add_development_dependency 'bundler', '~> 1.7'
+  spec.add_development_dependency 'bundler', '~> 1.9'
   spec.add_development_dependency 'rake', '~> 10.0'
   spec.add_runtime_dependency 'serialport', '1.3.1'
 end
