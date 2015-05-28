@@ -1,0 +1,5 @@
+/serial_modem.rb:326:in `synchronize'
+/serial_modem.rb:326:in `check_presence'
+/serial_modem.rb:295:in `setup_tty'
+/serial_modem.rb:318:in `setup_tty'
+/serial_modem.rb:38:in `setup_modem'

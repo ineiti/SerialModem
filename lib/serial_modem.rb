@@ -312,14 +312,14 @@ module SerialModem
       init_modem
       start_serial_thread
       if !@serial_sp
-        dputs(2) { 'Lost serial-connection while initialising - trying again' }
+        dputs(2) { 'Lost serial-connection while initialising - killing and reloading' }
         kill
         reload_option
-        setup_tty
-        return
+        return false
       end
       dputs(2) { 'finished connecting' }
     end
+    return @serial_sp != nil
   end
 
   def check_presence
@@ -354,7 +354,7 @@ module SerialModem
     @serial_thread = Thread.new {
       #dputs_func
       dputs(2) { 'Thread started' }
-      loop {
+      while @serial_sp do
         begin
           dputs(5) { 'Reading out modem' }
           if read_reply.length == 0
@@ -408,8 +408,8 @@ module SerialModem
           e.backtrace.each { |l| dputs(0) { l } }
         end
         dputs(5) { 'Finished' }
-      }
-      dputs(1) { 'Finished thread' }
+      end
+      dputs(0) { '@serial_sp disappeared - quitting' }
     }
   end
 
@@ -427,6 +427,7 @@ module SerialModem
 
   def kill
     #dputs_func
+    #puts "Killed by \n" + caller.join("\n")
     if @serial_thread
       if @serial_thread.alive?
         dputs(3) { 'Killing thread' }
