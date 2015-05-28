@@ -27,7 +27,7 @@ module SerialModem
     @serial_ussd_results = []
     @serial_ussd_results_max = 100
     @serial_ussd_sent = 0
-    @serial_ussd_sent_max = 3
+    @serial_ussd_sent_max = 5
     # TODO: once serialmodem == class, change this into Observer
     @serial_ussd_new = []
     @serial_ussd_new_list = []
@@ -168,7 +168,7 @@ module SerialModem
     @serial_ussd_last = Time.now
     if str_send
       #log_msg :SerialModem, "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
-      "and queue #{@serial_ussd}"
+      #"and queue #{@serial_ussd}"
       modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
     else
       dputs(2) { 'Sending ussd-close' }
@@ -367,9 +367,12 @@ module SerialModem
           dputs(4) { (Time.now - @serial_ussd_last).to_s }
           if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
               (@serial_ussd.length > 0)
-            if (@serial_ussd_sent += 1) >= @serial_ussd_sent_max
+            if (@serial_ussd_sent += 1) <= @serial_ussd_sent_max
               log_msg :SerialModem, "Re-sending #{@serial_ussd.first} for #{@serial_ussd_sent}"
               ussd_send_now
+            else
+              log_msg :SerialModem, "Discarding #{@serial_ussd.first}"
+              @serial_ussd.shift
             end
           end
 
