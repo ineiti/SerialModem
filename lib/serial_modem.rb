@@ -55,6 +55,7 @@ module SerialModem
       end
       lock and @serial_mutex.unlock
 
+      @serial_replies.each{|s| dputs(3){s}}
       while m = @serial_replies.shift
         @serial_debug and dputs_func
         next if (m == '' || m =~ /^\^/)
@@ -71,8 +72,13 @@ module SerialModem
               # Output desired:
               # ["0", "REC UNREAD", "+23599836457", "", "15/04/08,17:12:21+04"]
               id, flag, number, unknown, date =
-                  msg.scan(/"(.*?)"|([^",]+)\s*|,,/).collect { |a, b| a.to_s + b.to_s }
-              ret.push @serial_replies.shift
+                  msg.scan(/"(.*?)"|([^",]+)\s*|,,/m).collect { |a, b| a.to_s + b.to_s }
+              msg = []
+              while @serial_replies[0] != ''
+                msg.push @serial_replies.shift
+              end
+              @serial_replies.shift(2)
+              ret.push msg.join("\n")
               sms_new(id, flag, number, date, ret.last, unknown)
             when /CUSD/
               if pdu = msg.match(/.*\"(.*)\".*/)
