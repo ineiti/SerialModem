@@ -4,7 +4,7 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 
 Gem::Specification.new do |spec|
   spec.name          = 'serial_modem'
-  spec.version       = '0.3.2'
+  spec.version       = '0.3.5'
   spec.authors       = ['Linus Gasser']
   spec.email         = ['ineiti@linusetviviane.ch']
   spec.summary       = %q{Interface to serial-usb-modems}
