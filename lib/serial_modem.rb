@@ -41,7 +41,6 @@ module SerialModem
   def read_reply(wait = nil, lock: true)
     @serial_debug and dputs_func
     raise IOError.new('NoModemHere') unless @serial_sp
-    ret = []
     begin
       lock and @serial_mutex.lock
       while !@serial_sp.eof? || wait
@@ -55,62 +54,68 @@ module SerialModem
       end
       lock and @serial_mutex.unlock
 
-      @serial_replies.each{|s| dputs(3){s}}
-      while m = @serial_replies.shift
-        @serial_debug and dputs_func
-        next if (m == '' || m =~ /^\^/)
-        dputs(3) { "Reply: #{m}" }
-        ret.push m
-        if m =~ /\+[\w]{4}: /
-          code, msg = m[1..4], m[7..-1]
-          dputs(3) { "found code #{code.inspect} - #{msg.inspect}" }
-          @serial_codes[code] = msg
-          case code
-            when /CMGL/
-              # Typical input from the modem:
-              # "0,\"REC UNREAD\",\"+23599836457\",,\"15/04/08,17:12:21+04\""
-              # Output desired:
-              # ["0", "REC UNREAD", "+23599836457", "", "15/04/08,17:12:21+04"]
-              id, flag, number, unknown, date =
-                  msg.scan(/"(.*?)"|([^",]+)\s*|,,/m).collect { |a, b| a.to_s + b.to_s }
-              msg = []
-              while @serial_replies[0] != ''
-                msg.push @serial_replies.shift
-              end
-              @serial_replies.shift(2)
-              ret.push msg.join("\n")
-              sms_new(id, flag, number, date, ret.last, unknown)
-            when /CUSD/
-              if pdu = msg.match(/.*\"(.*)\".*/)
-                ussd_received(pdu_to_ussd(pdu[1]))
-              elsif msg == '2'
-                #log_msg :serialmodem, 'Closed USSD.'
-                #ussd_received('')
-                #ussd_close
-              else
-                log_msg :serialmodem, "Unknown: CUSD - #{msg}"
-              end
-            when /CMTI/
-              if msg =~ /^.ME.,/
-                dputs(3) { "I think I got a new message: #{msg}" }
-                @serial_sms_autoscan_last = Time.now - @serial_sms_autoscan
-              else
-                log_msg :serialmodem, "Unknown: CMTI - #{msg}"
-              end
-            # Probably a message or so - '+CMTI: "ME",0' is a new message
-          end
-        end
-      end
+      ret = interpret_serial_reply
     rescue IOError => e
       raise e
-=begin
-    rescue Exception => e
-      puts "#{e.inspect}"
-      puts "#{e.to_s}"
-      puts e.backtrace
-=end
     end
     ret
+  end
+
+  def interpret_serial_reply
+    ret = []
+    @serial_replies.each { |s| dputs(3) { s } }
+    while m = @serial_replies.shift
+      @serial_debug and dputs_func
+      dputs(3) { "Reply: #{m}" }
+      next if (m == '' || m =~ /^\^/)
+      ret.push m
+      if m =~ /\+[\w]{4}: /
+        code, msg = m[1..4], m[7..-1]
+        dputs(3) { "found code #{code.inspect} - #{msg.inspect}" }
+        @serial_codes[code] = msg
+        case code
+          when /CMGL/
+            # Typical input from the modem:
+            # "0,\"REC UNREAD\",\"+23599836457\",,\"15/04/08,17:12:21+04\""
+            # Output desired:
+            # ["0", "REC UNREAD", "+23599836457", "", "15/04/08,17:12:21+04"]
+            id, flag, number, unknown, date =
+                msg.scan(/"(.*?)"|([^",]+)\s*|,,/m).collect { |a, b| a.to_s + b.to_s }
+            msg = []
+            # Read all lines up to an empty line or a +CMGL: which indicates
+            # a new message
+            while @serial_replies[0] &&
+                @serial_replies[0] != '' &&
+                !(@serial_replies[0] =~ /^\+CMGL:/)
+              msg.push @serial_replies.shift
+            end
+            # If we finish with an empty line, delete it and the 'OK' that follows
+            if @serial_replies[0] == ''
+              @serial_replies.shift(2)
+            end
+            ret.push msg.join("\n")
+            sms_new(id, flag, number, date, ret.last, unknown)
+          when /CUSD/
+            if pdu = msg.match(/.*\"(.*)\".*/)
+              ussd_received(pdu_to_ussd(pdu[1]))
+            elsif msg == '2'
+              #log_msg :serialmodem, 'Closed USSD.'
+              #ussd_received('')
+              #ussd_close
+            else
+              log_msg :serialmodem, "Unknown: CUSD - #{msg}"
+            end
+          when /CMTI/
+            if msg =~ /^.ME.,/
+              dputs(3) { "I think I got a new message: #{msg}" }
+              @serial_sms_autoscan_last = Time.now - @serial_sms_autoscan
+            else
+              log_msg :serialmodem, "Unknown: CMTI - #{msg}"
+            end
+          # Probably a message or so - '+CMTI: "ME",0' is a new message
+        end
+      end
+    end
   end
 
   def sms_new(id, flag, number, date, msg, unknown = nil)
@@ -331,6 +336,7 @@ module SerialModem
   def check_presence
     @serial_mutex.synchronize {
       @serial_tty.to_s.length > 0 and File.exists?(@serial_tty) and return
+      System.exists?('lsusb') or return
       case lsusb = System.run_str('lsusb')
         when /12d1:1506/, /12d1:14ac/, /12d1:1c05/
           log_msg :SerialModem, 'Found 3G-modem with ttyUSB0-ttyUSB2'
@@ -362,13 +368,8 @@ module SerialModem
       dputs(2) { 'Thread started' }
       while @serial_sp do
         begin
-          dputs(5) { 'Reading out modem' }
-          if read_reply.length == 0
-            #@serial_sms.each { |id, sms|
-            #  ddputs(3) { "Deleting sms #{sms.inspect} afterwards" }
-            #  sms_delete(id)
-            #}
-          end
+          dputs(3) { 'Reading out modem' }
+          read_reply
 
           dputs(4) { (Time.now - @serial_ussd_last).to_s }
           if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
