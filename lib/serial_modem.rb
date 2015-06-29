@@ -373,15 +373,18 @@ module SerialModem
           read_reply
 
           dputs(4) { (Time.now - @serial_ussd_last).to_s }
-          if ((Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
-              (@serial_ussd.length > 0)) || @serial_ussd_send_next
+          if @serial_ussd_send_next
             @serial_ussd_send_next = false
+            ussd_send_now
+          elsif ((Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
+              (@serial_ussd.length > 0)) || @serial_ussd_send_next
             if (@serial_ussd_sent += 1) <= @serial_ussd_sent_max
               log_msg :SerialModem, "Re-sending #{@serial_ussd.first} for #{@serial_ussd_sent}"
               ussd_send_now
             else
               log_msg :SerialModem, "Discarding #{@serial_ussd.first}"
               @serial_ussd.shift
+              @serial_ussd_sent = 0
             end
           end
 
