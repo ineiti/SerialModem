@@ -28,6 +28,7 @@ module SerialModem
     @serial_ussd_results_max = 100
     @serial_ussd_sent = 0
     @serial_ussd_sent_max = 5
+    @serial_ussd_send_next = false
     # TODO: once serialmodem == class, change this into Observer
     @serial_ussd_new = []
     @serial_ussd_new_list = []
@@ -215,7 +216,7 @@ module SerialModem
                                 code: code, result: str)
       @serial_ussd_results.shift([0, @serial_ussd_results.length -
                                        @serial_ussd_results_max].max)
-      ussd_send_now
+      @serial_ussd_send_next = true
       @serial_ussd_sent = 0
       code
     else
@@ -372,8 +373,9 @@ module SerialModem
           read_reply
 
           dputs(4) { (Time.now - @serial_ussd_last).to_s }
-          if (Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
-              (@serial_ussd.length > 0)
+          if ((Time.now - @serial_ussd_last > @serial_ussd_timeout) &&
+              (@serial_ussd.length > 0)) || @serial_ussd_send_next
+            @serial_ussd_send_next = false
             if (@serial_ussd_sent += 1) <= @serial_ussd_sent_max
               log_msg :SerialModem, "Re-sending #{@serial_ussd.first} for #{@serial_ussd_sent}"
               ussd_send_now
