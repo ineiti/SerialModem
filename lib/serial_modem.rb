@@ -339,6 +339,12 @@ module SerialModem
       @serial_tty.to_s.length > 0 and File.exists?(@serial_tty) and return
       System.exists?('lsusb') or return
       case lsusb = System.run_str('lsusb')
+        when /19d2:fff1/
+          log_msg :SerialModem, 'Found CDMA-modem with ttyUSB0-ttyUSB4'
+          @serial_tty_error = '/dev/ttyUSB5'
+          @serial_tty = '/dev/ttyUSB1'
+          @ussd_add = ''
+          @serial_eats_sms = true
         when /12d1:1506/, /12d1:14ac/, /12d1:1c05/
           log_msg :SerialModem, 'Found 3G-modem with ttyUSB0-ttyUSB2'
           @serial_tty_error = '/dev/ttyUSB3'
