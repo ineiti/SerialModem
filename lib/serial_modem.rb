@@ -11,6 +11,7 @@ module SerialModem
   extend HelperClasses::DPuts
 
   def setup_modem(dev = nil)
+    # @serial_debug = true
     @serial_debug = false
     @serial_tty = @serial_tty_error = @serial_sp = nil
     @serial_replies = []
@@ -37,6 +38,7 @@ module SerialModem
     # turns off the CMTI-messages which slows down incoming SMS detection
     @serial_eats_sms = false
     setup_tty
+    dp "tty is #{@serial_tty}"
   end
 
   def read_reply(wait = nil, lock: true)
@@ -195,6 +197,7 @@ module SerialModem
   end
 
   def ussd_send(str)
+    # dputs_func
     if str.class == String
       dputs(3) { "Sending ussd-code #{str}" }
       @serial_ussd.push str
@@ -345,7 +348,7 @@ module SerialModem
           @serial_tty = '/dev/ttyUSB1'
           @ussd_add = ''
           @serial_eats_sms = true
-        when /12d1:1506/, /12d1:14ac/, /12d1:1c05/
+        when /12d1:1506/, /12d1:14ac/, /12d1:1c05/, /12d1:1001/
           log_msg :SerialModem, 'Found 3G-modem with ttyUSB0-ttyUSB2'
           @serial_tty_error = '/dev/ttyUSB3'
           @serial_tty = '/dev/ttyUSB2'
@@ -371,7 +374,7 @@ module SerialModem
 
   def start_serial_thread
     @serial_thread = Thread.new {
-      #dputs_func
+      # dputs_func
       dputs(2) { 'Thread started' }
       while @serial_sp do
         begin
