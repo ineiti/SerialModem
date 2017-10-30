@@ -4,13 +4,13 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 
 Gem::Specification.new do |spec|
   spec.name          = 'serial_modem'
-  spec.version       = '0.3.5'
+  spec.version = '0.4.0'
   spec.authors       = ['Linus Gasser']
-  spec.email         = ['ineiti@linusetviviane.ch']
+  spec.email = 'ineiti.blue'
   spec.summary       = %q{Interface to serial-usb-modems}
   spec.description   = %q{This can interface a lot of different usb-modems and serial modems}
   spec.homepage      = 'https://github.com/ineiti/SerialModem'
-  spec.license       = 'GPLv3'
+  spec.license = 'GPL-3.0'
 
   spec.files         = `if [ -d '.git' ]; then git ls-files -z; fi`.split("\x0")
   spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
