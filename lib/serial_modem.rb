@@ -38,7 +38,6 @@ module SerialModem
     # turns off the CMTI-messages which slows down incoming SMS detection
     @serial_eats_sms = false
     setup_tty
-    dp "tty is #{@serial_tty}"
   end
 
   def read_reply(wait = nil, lock: true)
@@ -99,8 +98,13 @@ module SerialModem
             ret.push msg.join("\n")
             sms_new(id, flag, number, date, ret.last, unknown)
           when /CUSD/
-            if pdu = msg.match(/.*\"(.*)\".*/)
-              ussd_received(pdu_to_ussd(pdu[1]))
+            dp "CUSD-msg: #{msg}"
+            if reply = msg.match(/.*\"(.*)\".*/)
+              if @ussd_pdu
+                ussd_received(pdu_to_ussd(reply[1]))
+              else
+                ussd_received(reply[1])
+              end
             elsif msg == '2'
               #log_msg :serialmodem, 'Closed USSD.'
               #ussd_received('')
@@ -181,9 +185,14 @@ module SerialModem
     str_send = @serial_ussd.first
     @serial_ussd_last = Time.now
     if str_send
-      #log_msg :SerialModem, "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
-      #"and queue #{@serial_ussd}"
-      modem_send("AT+CUSD=1,\"#{ussd_to_pdu(str_send)}\"#{@ussd_add}", 'OK')
+      log_msg :SerialModem, "Sending ussd-string #{str_send} with add of #{@ussd_add} "+
+                              "and queue #{@serial_ussd}."
+      if @ussd_pdu
+        str_send = ussd_to_pdu(str_send)
+        log_msg :SerialModem, "Using PDU-encoding: #{str_send}"
+      end
+      modem_send("AT+CUSD=1,\"#{str_send}\"#{@ussd_add}", 'OK')
+
     else
       dputs(2) { 'Sending ussd-close' }
       @serial_ussd.shift
@@ -230,7 +239,7 @@ module SerialModem
 
   def ussd_received(str)
     code = ussd_store_result(str)
-    dputs(2) { "Got result for #{code}: -#{str}-" }
+    ddputs(2) { "Got result for #{code}: -#{str}-" }
     @serial_ussd_new_list.push([code, str])
   end
 
@@ -270,7 +279,7 @@ module SerialModem
   end
 
   def get_operator
-    modem_send_array([['AT+COPS=3,0', 'OK'],
+    modem_send_array([['AT+COPS=3,1', 'OK'],
                       ['AT+COPS?', 'OK']])
     (1..6).each {
       if @serial_codes.has_key? 'COPS'
@@ -340,6 +349,7 @@ module SerialModem
   def check_presence
     @serial_mutex.synchronize {
       @serial_tty.to_s.length > 0 and File.exists?(@serial_tty) and return
+      @ussd_pdu = true
       System.exists?('lsusb') or return
       case lsusb = System.run_str('lsusb')
         when /19d2:fff1/
@@ -360,8 +370,10 @@ module SerialModem
           @serial_tty = '/dev/ttyUSB4'
           @ussd_add = ''
         else
-          #puts caller.join("\n")
-          @serial_tty = @serial_tty_error = nil
+          log_msg :SerialModem, 'Found unknown serial modem'
+          @serial_tty = '/dev/ttyUSB2'
+          @ussd_add = ',15'
+          @ussd_pdu = false
       end
       dputs(2) { "serial_tty is #{@serial_tty.inspect} and exists " +
           "#{File.exists?(@serial_tty.to_s)}" }
