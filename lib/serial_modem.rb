@@ -4,7 +4,7 @@ require 'helper_classes'
 module SerialModem
   DEBUG_LVL = 1
   attr_accessor :serial_sms_new, :serial_sms,
-                :serial_ussd_new
+                :serial_ussd_new, :operator_search
   extend self
   include HelperClasses
   include HelperClasses::DPuts
@@ -34,6 +34,7 @@ module SerialModem
     @serial_ussd_new = []
     @serial_ussd_new_list = []
     @serial_mutex = Mutex.new
+    @operator_search = true
     # Some Huawei-modems eat SMS once they send a +CMTI-message - this
     # turns off the CMTI-messages which slows down incoming SMS detection
     @serial_eats_sms = false
@@ -369,6 +370,13 @@ module SerialModem
           @serial_tty_error = '/dev/ttyUSB5'
           @serial_tty = '/dev/ttyUSB4'
           @ussd_add = ''
+        when /0bdb:1900/
+          log_msg :SerialModem, 'Found Ericsson 3G-modem with ttyACM'
+          @serial_tty_error = '/dev/ttyACM4'
+          @serial_tty = '/dev/ttyACM1'
+          @ussd_add = ',15'
+          @ussd_pdu = false
+          @operator_search = false
         else
           log_msg :SerialModem, 'Found unknown serial modem'
           @serial_tty = '/dev/ttyUSB2'
